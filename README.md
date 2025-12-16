@@ -78,7 +78,30 @@ npm run dev
 - 后端 API：`http://127.0.0.1:8000`
 - 前端界面：`http://127.0.0.1:5173`
 
-### 方式二：Docker 部署（推荐）
+### 方式二：托管后端到 Vercel / Cloudflare，前端用 GitHub Pages
+
+你可以一键把后端部署到 Vercel 或 Cloudflare，前端仍然通过 GitHub Pages 部署，只需要在前端构建时把后端的 URL 写进 `VITE_API_BASE_URL`。
+
+- **后端（Vercel - Node.js + SQLite）**  
+  [![Deploy Backend to Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2Fzhengui666%2FJh-adapter&project-name=jh-adapter-backend&repository-name=Jh-adapter&root-directory=backend)
+
+- **后端（Cloudflare Workers / Pages Functions）**  
+  [![Deploy Backend to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https%3A%2F%2Fgithub.com%2Fzhengui666%2FJh-adapter&projectName=jh-adapter-backend&directory=backend)
+
+> ⚠️ **注意（后端数据持久化）**：不论是 Vercel 还是 Cloudflare，Serverless 环境中的本地文件系统（包括 SQLite）都不是强持久化存储，适合演示和轻量使用。如果需要长期稳定的数据，请优先使用 Docker 或自建服务器部署。
+
+部署完成后：
+
+1.  先在 Vercel 或 Cloudflare 中部署 **后端\9879>ee**（backend）并记下它的域名，f8b982：  
+    - Vercel：`https://jh-adapter-backend-yourid.vercel.app`  
+    - Cloudflare：`https://your-worker-name.your-subdomain.workers.dev`
+2.  然后在 GitHub Actions 的 `frontend-pages.yml` 中，将：
+
+    - `VITE_API_BASE_URL` 设置为对应的后端地址（建议通过 GitHub Actions 的 Repository Variables 注入）。
+
+    重新部署前端后，GitHub Pages 上的前端会自动请求这个后端。
+
+### 方式三：Docker 部署（推荐）
 
 #### 1. 构建并启动
 
