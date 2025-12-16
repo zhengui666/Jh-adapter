@@ -244,12 +244,6 @@ Cloudflare 会以仓库根目录为项目根，自动读取 `wrangler.toml`，�
 VITE_API_BASE_URL="https://your-worker.your-subdomain.workers.dev/v1"
 ```
 
-**示例**（如果使用开发环境 Worker）：
-
-```bash
-VITE_API_BASE_URL="https://jh-adapter-backend.pergrouhixjwpauletteznp35.workers.dev/v1"
-```
-
 ---
 
 ## 🔌 API 使用示例

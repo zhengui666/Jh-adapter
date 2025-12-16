@@ -68,6 +68,10 @@ yarn-error.log*
 .env.local
 .env.*.local
 
+# Worker deployment info (may contain sensitive URLs)
+**/WORKER_URL.md
+**/DEPLOYMENT_INFO.md
+
 # Test files
 coverage/
 .nyc_output/
