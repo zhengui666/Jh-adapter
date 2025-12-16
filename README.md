@@ -12,10 +12,12 @@
   - `backend`：Node.js + Express + SQLite（适合自建或 Vercel 部署）
   - `backend-cloudflare`：Cloudflare Workers + D1（适合 Cloudflare 部署）
 - 🎨 **前端管理界面**：Vue 3 + Vite + TypeScript
+- 🐳 **Docker 支持**：一键部署前后端服务
+- ☁️ **多平台部署**：支持 Docker、Vercel、Cloudflare Workers
 
 ## 🏗️ 项目结构
 
-```bash
+```
 Jh-adapter/
 ├── backend/                    # Node.js + SQLite 后端（Express，DDD）
 │   ├── src/
@@ -30,6 +32,9 @@ Jh-adapter/
 │   ├── src/
 │   │   ├── d1-repositories.ts # 使用 D1 的 Repository 实现
 │   │   └── worker.ts          # Cloudflare Worker 主入口（Hono）
+│   ├── CLOUDFLARE_DEPLOY.md   # Cloudflare 部署配置指南
+│   ├── D1_DEPLOY.md           # D1 数据库部署指南
+│   ├── schema.sql             # D1 数据库初始化 SQL
 │   └── package.json
 ├── frontend/                   # Vue 3 管理前端
 │   ├── src/
@@ -42,6 +47,7 @@ Jh-adapter/
 ├── Dockerfile.backend
 ├── Dockerfile.frontend
 ├── wrangler.toml               # Cloudflare Workers 配置（入口：backend-cloudflare/src/worker.ts）
+├── package.json                # 根目录 package.json（用于 Cloudflare 部署）
 ├── jihu_proxy.db               # SQLite 数据库（本地 / Docker 自动创建）
 ├── jihu_oauth_config.json      # 本地 OAuth 配置（后端会同步到 SQLite）
 └── README.md
@@ -211,7 +217,7 @@ Cloudflare 一键部署默认不会自动安装依赖。部署后，需要在 Cl
 3. **配置 Build command**：设置为 `npm install && npx wrangler deploy`
 4. 保存并重新触发部署
 
-详细说明请参考：[Cloudflare 部署配置指南](./backend-cloudflare/CLOUDFLARE_DEPLOY.md)
+**详细说明请参考：[Cloudflare 部署配置指南](./backend-cloudflare/CLOUDFLARE_DEPLOY.md)**
 
 Cloudflare 会以仓库根目录为项目根，自动读取 `wrangler.toml`，入口是 `backend-cloudflare/src/worker.ts`。
 
@@ -264,7 +270,10 @@ print(resp.choices[0].message.content)
 ### Claude Messages 兼容接口
 
 ```bash
-curl -X POST http://127.0.0.1:8000/v1/messages   -H "Content-Type: application/json"   -H "X-API-Key: your-api-key"   -d '{
+curl -X POST http://127.0.0.1:8000/v1/messages \
+  -H "Content-Type: application/json" \
+  -H "X-API-Key: your-api-key" \
+  -d '{
     "model": "claude-sonnet-4-5-20250929",
     "max_tokens": 512,
     "messages": [
@@ -316,6 +325,14 @@ claude  # 启动 Claude Code
 
 ---
 
+## 📚 相关文档
+
+- [Cloudflare D1 数据库部署指南](./backend-cloudflare/D1_DEPLOY.md) - 详细的 D1 创建和初始化步骤
+- [Cloudflare 部署配置指南](./backend-cloudflare/CLOUDFLARE_DEPLOY.md) - 构建命令和环境变量配置
+- [后端 README](./backend/README.md) - Node.js 后端的详细说明
+
+---
+
 ## ⚠️ 安全提示
 
 - 生产环境务必使用 HTTPS
@@ -325,6 +342,44 @@ claude  # 启动 Claude Code
 
 ---
 
+## 🐛 故障排查
+
+### OAuth 认证失败
+
+1. 检查 `jihu_oauth_config.json` 是否存在且格式正确
+2. 运行 `npm run oauth-setup` 重新配置
+3. 确认 GitLab 应用的 Redirect URI 设置正确
+
+### 数据库连接问题
+
+- 确保 `jihu_proxy.db` 文件有读写权限
+- 在 Docker 环境中，检查 volume 挂载是否正确
+- Cloudflare D1：确认 `wrangler.toml` 中的 `database_id` 正确
+
+### 前端无法连接后端
+
+- 检查 `VITE_API_BASE_URL` 环境变量是否正确
+- 在 Docker 环境中，确保前端容器能访问 `backend` 服务
+- 检查浏览器控制台的网络请求错误
+
+### Cloudflare 部署问题
+
+- 参考 [Cloudflare 部署配置指南](./backend-cloudflare/CLOUDFLARE_DEPLOY.md)
+- 确认 Root directory 和 Build command 配置正确
+- 检查部署日志中的错误信息
+
+---
+
 ## 📄 许可证
 
 本项目使用 MIT 许可证，欢迎 Fork 和二次开发。
+
+---
+
+## 🤝 贡献
+
+欢迎提交 Issue 和 Pull Request！
+
+---
+
+**注意**：本项目仅用于学习和研究目的，请遵守 Jihu CodeRider 的使用条款。
