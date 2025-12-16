@@ -202,6 +202,16 @@ docker compose down
 
 [![Deploy Backend to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https%3A%2F%2Fgithub.com%2Fzhengui666%2FJh-adapter&projectName=jh-adapter-backend-cloudflare)
 
+**⚠️ 重要：配置构建命令**
+
+Cloudflare 一键部署默认不会自动安装依赖。部署后，需要在 Cloudflare Dashboard 中配置构建命令：
+
+1. 进入 **Workers & Pages** → 你的项目 → **Settings** → **Builds & deployments**
+2. 将 **Build command** 设置为：`npm install && npx wrangler deploy`
+3. 重新触发部署
+
+详细说明请参考：[Cloudflare 部署配置指南](./backend-cloudflare/CLOUDFLARE_DEPLOY.md)
+
 Cloudflare 会以仓库根目录为项目根，自动读取 `wrangler.toml`，入口是 `backend-cloudflare/src/worker.ts`。
 
 ### 3. 配置环境变量
