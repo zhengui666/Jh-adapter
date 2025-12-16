@@ -92,6 +92,21 @@ async function getCoderiderJwt(env: Env): Promise<string> {
 }
 
 function stripModelPrefix(model: string): string {
+
+function buildJihuAuthExpiredResponse(c: any, err: JihuAuthExpiredError) {
+  return c.json(
+    {
+      detail: {
+        error: "jihu_auth_expired",
+        message: err.message.replace("JIHU_AUTH_EXPIRED: ", ""),
+        login_url: "https://jihulab.com/-/user_settings/applications",
+        hint: "Cloudflare 版本：请在 Cloudflare Dashboard 中更新 GitLab OAuth 相关环境变量，然后重试。",
+      },
+    },
+    401,
+  );
+}
+
   for (const prefix of ["maas/", "server/"]) {
     if (model.startsWith(prefix)) {
       return model.slice(prefix.length);
@@ -513,7 +528,6 @@ app.get("/auth/oauth-callback", async (c) => {
 });
 
 // 简单模型列表
-// 简单模型列表
 app.get("/v1/models", (c) => {
   const baseModels = [{ id: DEFAULT_MODEL, object: "model", owned_by: "coderider" }];
   const extraModels = [
@@ -602,17 +616,7 @@ app.get("/v1/models/full", async (c) => {
     return c.json({ object: "list", data });
   } catch (err: any) {
     if (err instanceof JihuAuthExpiredError) {
-      return c.json(
-        {
-          detail: {
-            error: "jihu_auth_expired",
-            message: err.message.replace("JIHU_AUTH_EXPIRED: ", ""),
-            login_url: "https://jihulab.com/-/user_settings/applications",
-            hint: "Cloudflare 版本：请在 Cloudflare Dashboard 中更新 GitLab OAuth 相关环境变量，然后重试。",
-          },
-        },
-        401,
-      );
+      return buildJihuAuthExpiredResponse(c, err);
     }
     return c.json({ detail: err.message || "Unknown error" }, 502);
   }
@@ -689,17 +693,7 @@ app.post("/v1/chat/completions", withApiKey, async (c: any) => {
     return c.json(result);
   } catch (err: any) {
     if (err instanceof JihuAuthExpiredError) {
-      return c.json(
-        {
-          detail: {
-            error: "jihu_auth_expired",
-            message: err.message.replace("JIHU_AUTH_EXPIRED: ", ""),
-            login_url: "https://jihulab.com/-/user_settings/applications",
-            hint: "Cloudflare 版本：请在 Cloudflare Dashboard 中更新 GitLab OAuth 相关环境变量，然后重试。",
-          },
-        },
-        401,
-      );
+      return buildJihuAuthExpiredResponse(c, err);
     }
     return c.json({ detail: err.message || "Internal server error" }, 500);
   }
@@ -773,17 +767,7 @@ app.post("/v1/messages", withApiKey, async (c: any) => {
     return c.json(claudeResponse);
   } catch (err: any) {
     if (err instanceof JihuAuthExpiredError) {
-      return c.json(
-        {
-          detail: {
-            error: "jihu_auth_expired",
-            message: err.message.replace("JIHU_AUTH_EXPIRED: ", ""),
-            login_url: "https://jihulab.com/-/user_settings/applications",
-            hint: "Cloudflare 版本：请在 Cloudflare Dashboard 中更新 GitLab OAuth 相关环境变量，然后重试。",
-          },
-        },
-        401,
-      );
+      return buildJihuAuthExpiredResponse(c, err);
     }
     return c.json({ detail: err.message || "Internal server error" }, 500);
   }
