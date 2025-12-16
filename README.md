@@ -174,16 +174,29 @@ docker compose down
 - LLM：`/v1/models`、`/v1/models/full`、`/v1/chat/completions`、`/v1/messages`
 - 健康检查：`/health`
 
-### 1. 创建 Cloudflare D1 数据库
+### 1. 创建并初始化 Cloudflare D1 数据库
 
-在 Cloudflare Dashboard → D1 中新建数据库，记下 `database_id` 和 `database_name`，并填入 `wrangler.toml`：
+**详细步骤请参考：[D1 部署指南](./backend-cloudflare/D1_DEPLOY.md)**
 
-```toml
-[[d1_databases]]
-binding = "DB"
-database_name = "JH_ADAPTER_DB"
-database_id = "你的 D1 ID"
-```
+快速步骤：
+
+1. **创建 D1 数据库**（在 Cloudflare Dashboard 或使用 CLI）：
+   ```bash
+   wrangler d1 create JH_ADAPTER_DB
+   ```
+
+2. **更新 `wrangler.toml`**，填入 `database_id`：
+   ```toml
+   [[d1_databases]]
+   binding = "DB"
+   database_name = "JH_ADAPTER_DB"
+   database_id = "你的 D1 ID"  # 从步骤 1 获取
+   ```
+
+3. **初始化数据库 Schema**：
+   ```bash
+   wrangler d1 execute JH_ADAPTER_DB --file=backend-cloudflare/schema.sql
+   ```
 
 ### 2. 一键部署到 Cloudflare
 
