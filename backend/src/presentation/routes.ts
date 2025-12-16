@@ -135,12 +135,21 @@ router.post('/v1/chat/completions', requireApiKey, async (req: Request, res: Res
 });
 
 // GET /v1/models
+// 返回一个精简版模型列表，包含默认模型以及常用的 minimax / deepseek / glm 映射
 router.get('/v1/models', (req: Request, res: Response) => {
+  const baseModels = [
+    { id: DEFAULT_MODEL, object: 'model', owned_by: 'coderider' },
+  ];
+
+  const extraModels = [
+    { id: 'maas-minimax-m2', object: 'model', owned_by: 'coderider' },
+    { id: 'maas-deepseek-v3.1', object: 'model', owned_by: 'coderider' },
+    { id: 'maas-glm-4.6', object: 'model', owned_by: 'coderider' },
+  ];
+
   res.json({
     object: 'list',
-    data: [
-      { id: DEFAULT_MODEL, object: 'model', owned_by: 'coderider' },
-    ],
+    data: [...baseModels, ...extraModels],
   });
 });
 
@@ -176,6 +185,29 @@ router.get('/v1/models/full', async (req: Request, res: Response) => {
     (config.chat_models || []).forEach((tag: string) => data.push(buildEntry(tag, 'chat')));
     (config.code_completion_models || []).forEach((tag: string) => data.push(buildEntry(tag, 'code_completion')));
     (config.loom_models || []).forEach((tag: string) => data.push(buildEntry(tag, 'loom')));
+
+    // 确保 minimax / deepseek / glm 这几个常用模型始终存在于列表中
+    const staticModels = [
+      { id: 'maas-minimax-m2', type: 'chat', name: 'maas-minimax-m2', provider: 'minimax' },
+      { id: 'maas-deepseek-v3.1', type: 'chat', name: 'maas-deepseek-v3.1', provider: 'deepseek' },
+      { id: 'maas-glm-4.6', type: 'chat', name: 'maas-glm-4.6', provider: 'glm' },
+    ];
+
+    for (const m of staticModels) {
+      if (!data.some((d) => d.id === m.id)) {
+        data.push({
+          id: m.id,
+          object: 'model',
+          owned_by: 'coderider',
+          type: m.type,
+          name: m.name,
+          provider: m.provider,
+          context_window: null,
+          temperature: undefined,
+          raw: null,
+        });
+      }
+    }
 
     res.json({ object: 'list', data });
   } catch (error: any) {
