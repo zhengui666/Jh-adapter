@@ -1,10 +1,9 @@
 name = "jh-adapter-backend-cloudflare"
-main = "src/worker.ts"
+main = "backend-cloudflare/src/worker.ts"
 compatibility_date = "2024-01-01"
 
 [[d1_databases]]
 binding = "DB"
 database_name = "JH_ADAPTER_DB"
 database_id = "REPLACE_WITH_YOUR_D1_ID"
-
 
