@@ -85,8 +85,8 @@ npm run dev
 - **后端（Vercel - Node.js + SQLite）**  
   [![Deploy Backend to Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2Fzhengui666%2FJh-adapter&project-name=jh-adapter-backend&repository-name=Jh-adapter&root-directory=backend)
 
-- **后端（Cloudflare Workers / Pages Functions）**  
-  [![Deploy Backend to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https%3A%2F%2Fgithub.com%2Fzhengui666%2FJh-adapter&projectName=jh-adapter-backend&directory=backend)
+- **后端（Cloudflare Workers / Pages Functions，实验中，仅 /health 可用）**  
+  [![Deploy Backend to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https%3A%2F%2Fgithub.com%2Fzhengui666%2FJh-adapter&projectName=jh-adapter-backend-cloudflare&directory=backend-cloudflare)
 
 > ⚠️ **注意（后端数据持久化）**：不论是 Vercel 还是 Cloudflare，Serverless 环境中的本地文件系统（包括 SQLite）都不是强持久化存储，适合演示和轻量使用。如果需要长期稳定的数据，请优先使用 Docker 或自建服务器部署。
 
