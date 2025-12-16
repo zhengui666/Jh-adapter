@@ -10,8 +10,8 @@ import type {
   SessionRepository,
   RegistrationRequestRepository,
   SettingRepository,
-} from '../backend/src/infrastructure/repositories.js';
-import type { User, ApiKey, Session, RegistrationRequest } from '../backend/src/domain/entities.js';
+} from '../../backend/src/infrastructure/repositories.js';
+import type { User, ApiKey, Session, RegistrationRequest } from '../../backend/src/domain/entities.js';
 
 export interface D1Env {
   DB: D1Database;
