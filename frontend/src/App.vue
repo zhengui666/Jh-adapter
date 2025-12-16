@@ -34,12 +34,18 @@
             <div class="pill-small">Streaming via /v1/chat/completions</div>
           </div>
 
-          <ChatPanel
-            :api-base-url="apiBaseUrl"
-            :default-model="defaultModel"
-            :model="selectedModel"
-            :api-key="activeApiKey"
-          />
+          <template v-if="canChat">
+            <ChatPanel
+              :api-base-url="apiBaseUrl"
+              :default-model="defaultModel"
+              :model="selectedModel"
+              :api-key="activeApiKey"
+            />
+          </template>
+          <div v-else class="chat-locked">
+            <div class="chat-locked-title">需要登录才能聊天</div>
+            <div class="chat-locked-sub">请在右侧 “Account” 面板登录或注册，并等待管理员批准。</div>
+          </div>
 
           <div class="footer-hint">
             <span>Tip: Bind this endpoint in any OpenAI-compatible client.</span>
@@ -313,7 +319,7 @@ client = OpenAI(
 </template>
 
 <script lang="ts" setup>
-import { ref, reactive, onMounted } from "vue";
+import { ref, reactive, onMounted, computed } from "vue";
 import ChatPanel from "./components/ChatPanel.vue";
 import ModelList from "./components/ModelList.vue";
 
@@ -346,6 +352,8 @@ const adminKeys = ref<any[]>([]);
 const activeApiKey = ref<string | null>(null);
 const pendingRegistrations = ref<{ id: number; username: string; created_at: string }[]>([]);
 const sessionToken = ref<string | null>(null);
+
+const canChat = computed(() => !!currentUser.value && !!sessionToken.value);
 
 const authForm = reactive({
   username: "",
@@ -844,6 +852,26 @@ onMounted(() => {
   flex-wrap: wrap;
   gap: 8px;
   font-size: 0.7rem;
+  color: #9ca3af;
+}
+
+
+.chat-locked {
+  border-radius: 12px;
+  border: 1px dashed rgba(148, 163, 184, 0.6);
+  background: radial-gradient(circle at top left, rgba(15, 23, 42, 0.95), #020617);
+  padding: 10px 12px;
+  margin-top: 8px;
+}
+
+.chat-locked-title {
+  font-size: 0.9rem;
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+
+.chat-locked-sub {
+  font-size: 0.8rem;
   color: #9ca3af;
 }
 </style>
