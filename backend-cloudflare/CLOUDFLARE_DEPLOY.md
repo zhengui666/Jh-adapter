@@ -11,11 +11,26 @@ Cloudflare 一键部署按钮默认执行 `npx wrangler deploy`，但**不会自
 1. 登录 [Cloudflare Dashboard](https://dash.cloudflare.com/)
 2. 进入 **Workers & Pages** → 你的 Worker 项目
 3. 进入 **Settings** → **Builds & deployments**
-4. 找到 **Build command** 或 **Build configuration**
-5. 将构建命令设置为：
+4. **重要**：检查 **Root directory** 设置
+   - 应该设置为：**空** 或 **`.`**（表示仓库根目录）
+   - **不要**设置为 `backend-cloudflare`
+5. 找到 **Build command** 或 **Build configuration**
+6. 将构建命令设置为：
 
 ```bash
 npm install && npx wrangler deploy
+```
+
+如果仍然找不到 `package.json`，尝试：
+
+```bash
+cd /opt/buildhome/repo && npm install && npx wrangler deploy
+```
+
+或者检查实际的工作目录：
+
+```bash
+pwd && ls -la && npm install && npx wrangler deploy
 ```
 
 或者，如果你使用的是 **Pages** 部署：

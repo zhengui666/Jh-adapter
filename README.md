@@ -202,13 +202,14 @@ docker compose down
 
 [![Deploy Backend to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https%3A%2F%2Fgithub.com%2Fzhengui666%2FJh-adapter&projectName=jh-adapter-backend-cloudflare)
 
-**⚠️ 重要：配置构建命令**
+**⚠️ 重要：配置构建命令和根目录**
 
-Cloudflare 一键部署默认不会自动安装依赖。部署后，需要在 Cloudflare Dashboard 中配置构建命令：
+Cloudflare 一键部署默认不会自动安装依赖。部署后，需要在 Cloudflare Dashboard 中配置：
 
 1. 进入 **Workers & Pages** → 你的项目 → **Settings** → **Builds & deployments**
-2. 将 **Build command** 设置为：`npm install && npx wrangler deploy`
-3. 重新触发部署
+2. **检查 Root directory**：确保设置为 **空** 或 **`.`**（仓库根目录），**不要**设置为 `backend-cloudflare`
+3. **配置 Build command**：设置为 `npm install && npx wrangler deploy`
+4. 保存并重新触发部署
 
 详细说明请参考：[Cloudflare 部署配置指南](./backend-cloudflare/CLOUDFLARE_DEPLOY.md)
 
