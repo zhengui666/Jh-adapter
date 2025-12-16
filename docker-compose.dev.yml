@@ -1,0 +1,47 @@
+version: "3.9"
+
+# 开发环境配置
+# 使用方式: docker compose -f docker-compose.dev.yml up
+
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    container_name: jihu-proxy-backend-dev
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    volumes:
+      # 挂载源代码（支持热重载）
+      - ./backend/src:/app/src:ro
+      - ./backend/package.json:/app/package.json:ro
+      - ./backend/tsconfig.json:/app/tsconfig.json:ro
+      # 持久化数据
+      - ./jihu_proxy.db:/app/jihu_proxy.db
+      - ./jihu_oauth_config.json:/app/jihu_oauth_config.json
+    environment:
+      - NODE_ENV=development
+      - PORT=8000
+    command: npm run dev
+
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile.frontend
+      args:
+        VITE_API_BASE_URL: "http://backend:8000/v1"
+    container_name: jihu-proxy-frontend-dev
+    restart: unless-stopped
+    depends_on:
+      - backend
+    ports:
+      - "5173:80"
+    volumes:
+      # 挂载源代码（如果需要修改前端）
+      - ./frontend/src:/usr/share/nginx/html/src:ro
+
+networks:
+  default:
+    name: jihu-proxy-network-dev
+

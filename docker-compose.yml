@@ -1,0 +1,53 @@
+version: "3.9"
+
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    container_name: jihu-proxy-backend
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    volumes:
+      # 持久化数据库与 OAuth 配置（确保数据不丢失）
+      - ./jihu_proxy.db:/app/jihu_proxy.db
+      - ./jihu_oauth_config.json:/app/jihu_oauth_config.json
+    environment:
+      - NODE_ENV=production
+      - PORT=8000
+      # 可选：覆盖CodeRider API地址
+      # - CODERIDER_HOST=https://coderider.jihulab.com
+      # 可选：覆盖默认模型
+      # - CODERIDER_MODEL=maas/maas-chat-model
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://localhost:8000/health', (r) => {process.exit(r.statusCode === 200 ? 0 : 1)})"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 10s
+
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile.frontend
+      args:
+        # 构建时将前端的 API 基础地址指向 docker 内部的 backend 服务
+        # 注意：这里使用容器服务名，不是localhost
+        VITE_API_BASE_URL: "http://backend:8000/v1"
+    container_name: jihu-proxy-frontend
+    restart: unless-stopped
+    depends_on:
+      backend:
+        condition: service_healthy
+    ports:
+      - "5173:80"
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost/"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+
+networks:
+  default:
+    name: jihu-proxy-network
