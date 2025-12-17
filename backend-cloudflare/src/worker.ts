@@ -15,6 +15,7 @@ import { AuthService, ApiKeyService } from "../../backend/src/core/auth.js";
 import { RegistrationService } from "../../backend/src/core/registration.js";
 import { convertClaudeToOpenAI, buildClaudeResponse } from "../../backend/src/core/chat-claude.js";
 import { splitChatPayload } from "../../backend/src/core/chat-openai.js";
+import { adaptJihuToOpenAI } from "../../backend/src/core/openai-adapter.js";
 import { WorkerPasswordHasher } from "./worker-password";
 
 type Env = D1Env & {
@@ -659,7 +660,7 @@ async function callJihuChat(
   return (await res.json()) as any;
 }
 
-// Chat Completions（仅非流式）
+// Chat Completions（OpenAI 兼容：返回 content-part 数组，兼容 Cline 等客户端）
 app.post("/v1/chat/completions", withApiKey, async (c: any) => {
   const env = c.env as Env;
   const apiKeyId = c.get("apiKeyId");
@@ -669,12 +670,12 @@ app.post("/v1/chat/completions", withApiKey, async (c: any) => {
   const payload = (await c.req.json().catch(() => ({}))) as any;
   const { messages, model, stream, extraParams } = splitChatPayload(payload);
 
-  // 目前先忽略 stream 标志，一律按非流式处理，保证兼容 Cline/Claude 等默认 stream=true 的客户端
-
   try {
-    const result = await callJihuChat(env, model, messages, extraParams);
+    // 忽略 stream 标志：统一返回非流式 JSON，保证与 Cline 等默认 stream=true 的客户端兼容
+    const raw = await callJihuChat(env, model, messages, extraParams);
+    const result = adaptJihuToOpenAI(raw, model || DEFAULT_MODEL);
 
-    if (apiKeyId && result.usage) {
+    if (apiKeyId && result?.usage) {
       await apiKeyRepo.updateUsage(
         apiKeyId,
         result.usage.prompt_tokens || 0,
