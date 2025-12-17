@@ -10,6 +10,12 @@ import {
   type D1Env,
 } from "./d1-repositories";
 import { AuthenticationError, JihuAuthExpiredError } from "../../backend/src/domain/exceptions";
+import { STATIC_CHAT_MODELS, stripModelPrefix } from "../../backend/src/shared/model-utils";
+import { AuthService, ApiKeyService } from "../../backend/src/core/auth.js";
+import { RegistrationService } from "../../backend/src/core/registration.js";
+import { convertClaudeToOpenAI, buildClaudeResponse } from "../../backend/src/core/chat-claude.js";
+import { splitChatPayload } from "../../backend/src/core/chat-openai.js";
+import { WorkerPasswordHasher } from "./worker-password";
 
 type Env = D1Env & {
   GITLAB_OAUTH_ACCESS_TOKEN?: string;
@@ -26,21 +32,6 @@ app.use("/*", cors({ origin: "*", allowMethods: ["GET", "POST", "OPTIONS"], allo
 
 // 处理所有路径的 OPTIONS 预检请求
 app.options("/*", (c) => c.text("", 204));
-
-// 简单密码工具（Cloudflare 使用 Web Crypto）
-async function hashPassword(password: string): Promise<string> {
-  const enc = new TextEncoder();
-  const data = enc.encode(password);
-  const digest = await crypto.subtle.digest("SHA-256", data);
-  return Array.from(new Uint8Array(digest))
-    .map((b) => b.toString(16).padStart(2, "0"))
-    .join("");
-}
-
-async function verifyPassword(password: string, storedHash: string): Promise<boolean> {
-  const hash = await hashPassword(password);
-  return hash === storedHash;
-}
 
 function getCoderiderHost(env: Env): string {
   return env.CODERIDER_HOST || DEFAULT_CODERIDER_HOST;
@@ -108,15 +99,6 @@ async function getCoderiderJwt(env: Env): Promise<string> {
   return token;
 }
 
-function stripModelPrefix(model: string): string {
-  for (const prefix of ["maas/", "server/"]) {
-    if (model.startsWith(prefix)) {
-      return model.slice(prefix.length);
-    }
-  }
-  return model;
-}
-
 function buildJihuAuthExpiredResponse(c: any, err: JihuAuthExpiredError) {
   return c.json(
     {
@@ -142,6 +124,7 @@ app.post("/auth/register", async (c) => {
   const db = env.DB as D1Database;
   const userRepo = new D1UserRepository(db);
   const apiKeyRepo = new D1ApiKeyRepository(db);
+  const sessionRepo = new D1SessionRepository(db);
   const body = (await c.req.json().catch(() => ({}))) as any;
   const { username, password } = body;
 
@@ -157,29 +140,12 @@ app.post("/auth/register", async (c) => {
   }
 
   try {
-    const existed = await userRepo.findByUsername(username);
-    if (existed) {
-      return c.json({ detail: "username already exists" }, 400);
-    }
+    const passwordHasher = new WorkerPasswordHasher();
+    const authService = new AuthService(userRepo, sessionRepo, passwordHasher);
+    const apiKeyService = new ApiKeyService(apiKeyRepo);
 
-    const passwordHash = await hashPassword(password);
-    const isAdmin = !(await userRepo.exists());
-    const userId = await userRepo.create({
-      id: null,
-      username,
-      passwordHash,
-      isAdmin,
-      createdAt: new Date(),
-    });
-
-    const [, key] = await apiKeyRepo.create({
-      id: null,
-      userId,
-      key: "",
-      name: "default",
-      isActive: true,
-      createdAt: new Date(),
-    });
+    const [userId, isAdmin] = await authService.register(username, password, false);
+    const [, key] = await apiKeyService.create(userId, "default");
 
     return c.json({
       user: { id: userId, username, is_admin: isAdmin },
@@ -207,18 +173,13 @@ app.post("/auth/login", async (c) => {
   }
 
   try {
+    const passwordHasher = new WorkerPasswordHasher();
+    const authService = new AuthService(userRepo, sessionRepo, passwordHasher);
+    const apiKeyService = new ApiKeyService(apiKeyRepo);
+
+    const session = await authService.login(username, password);
+    const keys = await apiKeyService.listUserKeys(session.userId);
     const user = await userRepo.findByUsername(username);
-    if (!user) {
-      throw new AuthenticationError("Invalid username or password");
-    }
-
-    const valid = await verifyPassword(password, user.passwordHash);
-    if (!valid) {
-      throw new AuthenticationError("Invalid username or password");
-    }
-
-    const session = await sessionRepo.create(user.id!);
-    const keys = await apiKeyRepo.listByUser(session.userId);
 
     return c.json({
       user: { id: user.id, username, is_admin: user.isAdmin || false },
@@ -334,7 +295,8 @@ app.get("/admin/api-keys", withApiKey, withSession, async (c: any) => {
   }
 
   const apiKeyRepo = new D1ApiKeyRepository(db);
-  const keys = await apiKeyRepo.listAll();
+  const apiKeyService = new ApiKeyService(apiKeyRepo);
+  const keys = await apiKeyService.listAll();
   return c.json({ api_keys: keys });
 });
 
@@ -349,7 +311,8 @@ app.get("/admin/registrations", withApiKey, withSession, async (c: any) => {
   }
 
   const regRepo = new D1RegistrationRequestRepository(db);
-  const requests = await regRepo.listPending();
+  const registrationService = new RegistrationService(regRepo);
+  const requests = await registrationService.listPending();
   return c.json({ registration_requests: requests });
 });
 
@@ -365,7 +328,8 @@ app.post("/admin/registrations/:id/approve", withApiKey, withSession, async (c: 
 
   const id = Number(c.req.param("id"));
   const regRepo = new D1RegistrationRequestRepository(db);
-  await regRepo.approve(id);
+  const registrationService = new RegistrationService(regRepo);
+  await registrationService.approve(id);
   return c.json({ status: "ok" });
 });
 
@@ -381,7 +345,8 @@ app.post("/admin/registrations/:id/reject", withApiKey, withSession, async (c: a
 
   const id = Number(c.req.param("id"));
   const regRepo = new D1RegistrationRequestRepository(db);
-  await regRepo.reject(id);
+  const registrationService = new RegistrationService(regRepo);
+  await registrationService.reject(id);
   return c.json({ status: "ok" });
 });
 
@@ -546,11 +511,11 @@ app.get("/auth/oauth-callback", async (c) => {
 // 简单模型列表
 app.get("/v1/models", (c) => {
   const baseModels = [{ id: DEFAULT_MODEL, object: "model", owned_by: "coderider" }];
-  const extraModels = [
-    { id: "maas-minimax-m2", object: "model", owned_by: "coderider" },
-    { id: "maas-deepseek-v3.1", object: "model", owned_by: "coderider" },
-    { id: "maas-glm-4.6", object: "model", owned_by: "coderider" },
-  ];
+  const extraModels = STATIC_CHAT_MODELS.map((m) => ({
+    id: m.id,
+    object: "model",
+    owned_by: "coderider",
+  }));
   return c.json({
     object: "list",
     data: [...baseModels, ...extraModels],
@@ -607,11 +572,7 @@ app.get("/v1/models/full", async (c) => {
     );
     (config.loom_models || []).forEach((tag: string) => data.push(buildEntry(tag, "loom")));
 
-    const staticModels = [
-      { id: "maas-minimax-m2", type: "chat", name: "maas-minimax-m2", provider: "minimax" },
-      { id: "maas-deepseek-v3.1", type: "chat", name: "maas-deepseek-v3.1", provider: "deepseek" },
-      { id: "maas-glm-4.6", type: "chat", name: "maas-glm-4.6", provider: "glm" },
-    ];
+    const staticModels = STATIC_CHAT_MODELS;
 
     for (const m of staticModels) {
       if (!data.some((d) => d.id === m.id)) {
@@ -691,7 +652,7 @@ app.post("/v1/chat/completions", withApiKey, async (c: any) => {
   const apiKeyRepo = new D1ApiKeyRepository(db);
 
   const payload = (await c.req.json().catch(() => ({}))) as any;
-  const { messages = [], model, stream, ...rest } = payload;
+  const { messages, model, stream, extraParams } = splitChatPayload(payload);
 
   if (stream) {
     return c.json(
@@ -701,7 +662,7 @@ app.post("/v1/chat/completions", withApiKey, async (c: any) => {
   }
 
   try {
-    const result = await callJihuChat(env, model, messages, rest);
+    const result = await callJihuChat(env, model, messages, extraParams);
 
     if (apiKeyId && result.usage) {
       await apiKeyRepo.updateUsage(
@@ -728,38 +689,7 @@ app.post("/v1/messages", withApiKey, async (c: any) => {
   const apiKeyRepo = new D1ApiKeyRepository(db);
 
   const payload = (await c.req.json().catch(() => ({}))) as any;
-  const messages = payload.messages || [];
-  const openaiMessages = messages.map((msg: any) => {
-    if (msg.content && typeof msg.content === "string") {
-      return { role: msg.role, content: msg.content };
-    }
-    if (Array.isArray(msg.content)) {
-      const textParts = msg.content
-        .filter((c: any) => c.type === "text")
-        .map((c: any) => c.text)
-        .join("\n");
-      return { role: msg.role, content: textParts };
-    }
-    return { role: msg.role, content: "" };
-  });
-
-  const modelMapping: Record<string, string> = {
-    "claude-3-5-sonnet-20241022": "maas-minimax-m2",
-    "claude-3-5-haiku-20241022": "maas-deepseek-v3.1",
-    "claude-3-opus-20240229": "maas-glm-4.6",
-    "claude-sonnet-4-5-20250929": "maas-minimax-m2",
-    "claude-haiku-4-5-20251001": "maas-deepseek-v3.1",
-    "claude-opus-4-5-20251101": "maas-glm-4.6",
-  };
-
-  const jihuModel = modelMapping[payload.model] || payload.model;
-
-  const extraParams: any = {};
-  if (payload.max_tokens) extraParams.max_tokens = payload.max_tokens;
-  if (payload.temperature !== undefined) extraParams.temperature = payload.temperature;
-  if (payload.top_p !== undefined) extraParams.top_p = payload.top_p;
-  if (payload.top_k !== undefined) extraParams.top_k = payload.top_k;
-  if (payload.stop_sequences) extraParams.stop_sequences = payload.stop_sequences;
+  const { messages: openaiMessages, jihuModel, extraParams } = convertClaudeToOpenAI(payload);
 
   try {
     const result = await callJihuChat(env, jihuModel, openaiMessages, extraParams);
@@ -772,19 +702,7 @@ app.post("/v1/messages", withApiKey, async (c: any) => {
       );
     }
 
-    const claudeResponse = {
-      id: result.id || "msg-" + Date.now(),
-      type: "message",
-      role: "assistant",
-      content: result.choices?.[0]?.message?.content
-        ? [{ type: "text", text: result.choices[0].message.content }]
-        : [],
-      model: payload.model,
-      stop_reason: result.choices?.[0]?.finish_reason || "end_turn",
-      stop_sequence: null,
-      usage: result.usage,
-    };
-
+    const claudeResponse = buildClaudeResponse(result, payload.model);
     return c.json(claudeResponse);
   } catch (err: any) {
     if (err instanceof JihuAuthExpiredError) {

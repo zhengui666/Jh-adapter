@@ -7,8 +7,6 @@ import axios from 'axios';
 import type { SettingRepository } from './repositories.js';
 import { JihuAuthExpiredError } from '../domain/exceptions.js';
 import {
-  getGitLabAccessToken,
-  getGitLabRefreshToken,
   getGitLabClientId,
   getGitLabClientSecret,
   getGitLabRedirectUri,
@@ -18,7 +16,6 @@ import { triggerOAuthSetupAsync } from './oauth-flow.js';
 
 export class OAuthService {
   private settingRepo: SettingRepository;
-  private cachedAccessToken: string | null = null;
 
   constructor(settingRepo: SettingRepository) {
     this.settingRepo = settingRepo;
@@ -33,7 +30,6 @@ export class OAuthService {
       freshConfig.access_token;
 
     if (freshAccessToken) {
-      this.cachedAccessToken = freshAccessToken;
       return freshAccessToken;
     }
 
@@ -65,8 +61,8 @@ export class OAuthService {
         redirect_uri: redirectUri,
       });
 
-      this.cachedAccessToken = response.data.access_token;
-      return this.cachedAccessToken;
+      const newToken: string = response.data.access_token;
+      return newToken;
     } catch (error: any) {
       if (error.response?.status === 400 || error.response?.status === 401) {
         triggerOAuthSetupAsync();
@@ -77,7 +73,7 @@ export class OAuthService {
   }
 
   clearCache(): void {
-    this.cachedAccessToken = null;
+    // no-op: 保留方法以兼容旧调用方
   }
 }
 

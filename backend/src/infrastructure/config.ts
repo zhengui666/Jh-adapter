@@ -5,6 +5,7 @@ import { readFileSync, existsSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import type { SettingRepository } from './repositories.js';
+import { BASE_DEFAULT_MODEL } from '../shared/model-utils.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -55,7 +56,7 @@ function getConfig(
 }
 
 export const CODERIDER_HOST = process.env.CODERIDER_HOST || 'https://coderider.jihulab.com';
-export const DEFAULT_MODEL = process.env.CODERIDER_MODEL || 'maas/maas-chat-model';
+export const DEFAULT_MODEL = process.env.CODERIDER_MODEL || BASE_DEFAULT_MODEL;
 
 export function getGitLabAccessToken(settingRepo?: SettingRepository): string | null {
   return getConfig('access_token', 'GITLAB_OAUTH_ACCESS_TOKEN', undefined, settingRepo);

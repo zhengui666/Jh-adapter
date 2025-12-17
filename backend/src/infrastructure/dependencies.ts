@@ -12,7 +12,9 @@ import {
 } from './sqlite-repositories.js';
 import { OAuthService } from './oauth-service.js';
 import { JihuClient } from './jihu-client.js';
-import { PasswordService, AuthService, ApiKeyService, ChatService } from '../application/services.js';
+import { BcryptPasswordHasher, ChatService } from '../application/services.js';
+import { AuthService, ApiKeyService } from '../core/auth.js';
+import { RegistrationService } from '../core/registration.js';
 import { CODERIDER_HOST, DEFAULT_MODEL } from './config.js';
 
 // 单例实例
@@ -25,10 +27,11 @@ const settingRepo = new SQLiteSettingRepository();
 const oauthService = new OAuthService(settingRepo);
 const jihuClient = new JihuClient(CODERIDER_HOST, oauthService, DEFAULT_MODEL);
 
-const passwordService = PasswordService;
+const passwordService = new BcryptPasswordHasher();
 const authService = new AuthService(userRepo, sessionRepo, passwordService);
-const apiKeyService = new ApiKeyService(apiKeyRepo, userRepo);
+const apiKeyService = new ApiKeyService(apiKeyRepo);
 const chatService = new ChatService(jihuClient);
+const registrationService = new RegistrationService(registrationRepo);
 
 export function getAuthService(): AuthService {
   return authService;
@@ -46,16 +49,16 @@ export function getUserRepo() {
   return userRepo;
 }
 
-export function getApiKeyRepo(): SQLiteApiKeyRepository {
-  return apiKeyRepo;
-}
-
 export function getSessionRepo() {
   return sessionRepo;
 }
 
 export function getRegistrationRepo() {
   return registrationRepo;
+}
+
+export function getRegistrationService(): RegistrationService {
+  return registrationService;
 }
 
 export function getSettingRepo() {

@@ -9,7 +9,6 @@ import type {
   ApiKeyRepository,
   SessionRepository,
   RegistrationRequestRepository,
-  SettingRepository,
 } from '../../backend/src/infrastructure/repositories.js';
 import type { User, ApiKey, Session, RegistrationRequest } from '../../backend/src/domain/entities.js';
 
@@ -274,7 +273,7 @@ export class D1RegistrationRequestRepository implements RegistrationRequestRepos
   }
 }
 
-export class D1SettingRepository implements SettingRepository {
+export class D1SettingRepository {
   constructor(private db: D1Database) {}
 
   async get(key: string): Promise<string | null> {

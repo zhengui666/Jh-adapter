@@ -22,7 +22,7 @@ app.use(express.json());
 app.use('/', routes);
 
 // 错误处理
-app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
+app.use((err: any, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
   console.error('Error:', err);
   res.status(500).json({ detail: err.message || 'Internal server error' });
 });

@@ -84,7 +84,7 @@ function rowToUser(row: any): User {
 }
 
 export class SQLiteUserRepository implements UserRepository {
-  create(user: User): number {
+  async create(user: User): Promise<number> {
     const db = getDb();
     try {
       const now = new Date().toISOString();
@@ -98,7 +98,7 @@ export class SQLiteUserRepository implements UserRepository {
     }
   }
 
-  findByUsername(username: string): User | null {
+  async findByUsername(username: string): Promise<User | null> {
     const db = getDb();
     try {
       const stmt = db.prepare('SELECT * FROM users WHERE username = ?');
@@ -109,7 +109,7 @@ export class SQLiteUserRepository implements UserRepository {
     }
   }
 
-  exists(): boolean {
+  async exists(): Promise<boolean> {
     const db = getDb();
     try {
       const stmt = db.prepare('SELECT 1 FROM users LIMIT 1');
@@ -119,7 +119,7 @@ export class SQLiteUserRepository implements UserRepository {
     }
   }
 
-  findFirstAdmin(): User | null {
+  async findFirstAdmin(): Promise<User | null> {
     const db = getDb();
     try {
       const stmt = db.prepare('SELECT * FROM users WHERE is_admin = 1 ORDER BY id ASC LIMIT 1');
@@ -132,7 +132,7 @@ export class SQLiteUserRepository implements UserRepository {
 }
 
 export class SQLiteApiKeyRepository implements ApiKeyRepository {
-  create(apiKey: ApiKey): [number, string] {
+  async create(apiKey: ApiKey): Promise<[number, string]> {
     const db = getDb();
     try {
       const now = new Date().toISOString();
@@ -154,7 +154,7 @@ export class SQLiteApiKeyRepository implements ApiKeyRepository {
     }
   }
 
-  findByKey(key: string): Record<string, any> | null {
+  async findByKey(key: string): Promise<Record<string, any> | null> {
     const db = getDb();
     try {
       const stmt = db.prepare(`
@@ -169,7 +169,7 @@ export class SQLiteApiKeyRepository implements ApiKeyRepository {
     }
   }
 
-  listByUser(userId: number): Record<string, any>[] {
+  async listByUser(userId: number): Promise<Record<string, any>[]> {
     const db = getDb();
     try {
       const stmt = db.prepare(`
@@ -188,7 +188,7 @@ export class SQLiteApiKeyRepository implements ApiKeyRepository {
     }
   }
 
-  listAll(): Record<string, any>[] {
+  async listAll(): Promise<Record<string, any>[]> {
     const db = getDb();
     try {
       const stmt = db.prepare(`
@@ -210,7 +210,7 @@ export class SQLiteApiKeyRepository implements ApiKeyRepository {
     }
   }
 
-  updateUsage(apiKeyId: number, inputTokens: number, outputTokens: number): void {
+  async updateUsage(apiKeyId: number, inputTokens: number, outputTokens: number): Promise<void> {
     const db = getDb();
     try {
       const now = new Date().toISOString();
@@ -229,7 +229,7 @@ export class SQLiteApiKeyRepository implements ApiKeyRepository {
 }
 
 export class SQLiteSessionRepository implements SessionRepository {
-  create(userId: number): Session {
+  async create(userId: number): Promise<Session> {
     const db = getDb();
     try {
       const token = randomBytes(32).toString('base64url');
@@ -249,7 +249,7 @@ export class SQLiteSessionRepository implements SessionRepository {
     }
   }
 
-  findByToken(token: string): Session | null {
+  async findByToken(token: string): Promise<Session | null> {
     const db = getDb();
     try {
       const stmt = db.prepare('SELECT * FROM sessions WHERE token = ?');
@@ -267,7 +267,7 @@ export class SQLiteSessionRepository implements SessionRepository {
     }
   }
 
-  touch(token: string): void {
+  async touch(token: string): Promise<void> {
     const db = getDb();
     try {
       const now = new Date().toISOString();
@@ -277,7 +277,7 @@ export class SQLiteSessionRepository implements SessionRepository {
     }
   }
 
-  delete(token: string): void {
+  async delete(token: string): Promise<void> {
     const db = getDb();
     try {
       db.prepare('DELETE FROM sessions WHERE token = ?').run(token);
@@ -286,7 +286,7 @@ export class SQLiteSessionRepository implements SessionRepository {
     }
   }
 
-  cleanupExpired(): void {
+  async cleanupExpired(): Promise<void> {
     const db = getDb();
     try {
       const cutoff = new Date();
@@ -299,7 +299,7 @@ export class SQLiteSessionRepository implements SessionRepository {
 }
 
 export class SQLiteRegistrationRequestRepository implements RegistrationRequestRepository {
-  create(request: RegistrationRequest): number {
+  async create(request: RegistrationRequest): Promise<number> {
     const db = getDb();
     try {
       const now = new Date().toISOString();
@@ -313,7 +313,7 @@ export class SQLiteRegistrationRequestRepository implements RegistrationRequestR
     }
   }
 
-  listPending(): Record<string, any>[] {
+  async listPending(): Promise<Record<string, any>[]> {
     const db = getDb();
     try {
       const stmt = db.prepare(
@@ -325,7 +325,7 @@ export class SQLiteRegistrationRequestRepository implements RegistrationRequestR
     }
   }
 
-  approve(requestId: number): void {
+  async approve(requestId: number): Promise<void> {
     const db = getDb();
     try {
       const stmt = db.prepare('SELECT * FROM registration_requests WHERE id = ?');
@@ -342,7 +342,7 @@ export class SQLiteRegistrationRequestRepository implements RegistrationRequestR
     }
   }
 
-  reject(requestId: number): void {
+  async reject(requestId: number): Promise<void> {
     const db = getDb();
     try {
       db.prepare("UPDATE registration_requests SET status = 'rejected' WHERE id = ?").run(requestId);

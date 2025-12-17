@@ -11,17 +11,20 @@ import {
   getSettingRepo,
   getUserRepo,
   getSessionRepo,
-  getRegistrationRepo,
-  getApiKeyRepo,
+  getRegistrationService,
 } from '../infrastructure/dependencies.js';
 import { JihuAuthExpiredError } from '../domain/exceptions.js';
 import { DEFAULT_MODEL } from '../infrastructure/config.js';
-import { PasswordService } from '../application/services.js';
+import { BcryptPasswordHasher } from '../application/services.js';
+import { STATIC_CHAT_MODELS } from '../shared/model-utils.js';
+import { convertClaudeToOpenAI, buildClaudeResponse } from '../core/chat-claude.js';
+import { splitChatPayload } from '../core/chat-openai.js';
+import { buildEventLoggingResponse } from '../core/event-logging.js';
 
 const router = express.Router();
 
 // 中间件：验证API Key
-function requireApiKey(req: Request, res: Response, next: NextFunction) {
+async function requireApiKey(req: Request, res: Response, next: NextFunction) {
   const apiKey = req.headers['x-api-key'] as string;
   if (!apiKey) {
     return res.status(401).json({ detail: 'Missing X-API-Key header' });
@@ -29,17 +32,17 @@ function requireApiKey(req: Request, res: Response, next: NextFunction) {
 
   try {
     const apiKeyService = getApiKeyService();
-    const record = apiKeyService.validate(apiKey);
+    const record = await apiKeyService.validate(apiKey);
     (req as any).apiKeyRecord = record;
     (req as any).apiKeyId = record.id;
-    next();
+    return next();
   } catch (error) {
     return res.status(401).json({ detail: 'Invalid or inactive API key' });
   }
 }
 
 // 中间件：验证Session
-function requireSession(req: Request, res: Response, next: NextFunction) {
+async function requireSession(req: Request, res: Response, next: NextFunction) {
   const token = req.headers['x-session-token'] as string;
   if (!token) {
     return res.status(401).json({ detail: 'Missing X-Session-Token header' });
@@ -47,9 +50,9 @@ function requireSession(req: Request, res: Response, next: NextFunction) {
 
   try {
     const authService = getAuthService();
-    const session = authService.validateSession(token);
+    const session = await authService.validateSession(token);
     (req as any).session = session;
-    next();
+    return next();
   } catch (error) {
     return res.status(401).json({ detail: 'Invalid or expired session' });
   }
@@ -87,26 +90,21 @@ function handleJihuAuthError(error: any, res: Response) {
 router.post('/v1/chat/completions', requireApiKey, async (req: Request, res: Response) => {
   try {
     const payload = req.body;
-    const stream = Boolean(payload.stream);
+    const { messages, model, stream, extraParams } = splitChatPayload(payload);
     const apiKeyId = (req as any).apiKeyId;
 
     const chatService = getChatService();
-    const chatPayload: any = { ...payload };
-    delete chatPayload.messages;
-    delete chatPayload.model;
-    delete chatPayload.stream;
-    
     const result = await chatService.chatCompletions(
-      payload.messages || [],
-      payload.model,
+      messages,
+      model,
       stream,
-      chatPayload
+      extraParams
     );
 
     // 记录用量（非流式响应）
     if (!stream && result.usage && apiKeyId) {
       const apiKeyService = getApiKeyService();
-      apiKeyService.updateUsage(
+      await apiKeyService.updateUsage(
         apiKeyId,
         result.usage.prompt_tokens || 0,
         result.usage.completion_tokens || 0
@@ -122,30 +120,30 @@ router.post('/v1/chat/completions', requireApiKey, async (req: Request, res: Res
       } else {
         res.end();
       }
-    } else {
-      res.json(result);
+      return;
     }
+    return res.json(result);
   } catch (error: any) {
     if (error instanceof JihuAuthExpiredError) {
       return handleJihuAuthError(error, res);
     }
     const errorMsg = normalizeErrorMessage(error.message || 'Internal server error');
-    res.status(500).json({ detail: errorMsg });
+    return res.status(500).json({ detail: errorMsg });
   }
 });
 
 // GET /v1/models
 // 返回一个精简版模型列表，包含默认模型以及常用的 minimax / deepseek / glm 映射
-router.get('/v1/models', (req: Request, res: Response) => {
+router.get('/v1/models', (_req: Request, res: Response) => {
   const baseModels = [
     { id: DEFAULT_MODEL, object: 'model', owned_by: 'coderider' },
   ];
 
-  const extraModels = [
-    { id: 'maas-minimax-m2', object: 'model', owned_by: 'coderider' },
-    { id: 'maas-deepseek-v3.1', object: 'model', owned_by: 'coderider' },
-    { id: 'maas-glm-4.6', object: 'model', owned_by: 'coderider' },
-  ];
+  const extraModels = STATIC_CHAT_MODELS.map((m) => ({
+    id: m.id,
+    object: 'model',
+    owned_by: 'coderider',
+  }));
 
   res.json({
     object: 'list',
@@ -154,7 +152,7 @@ router.get('/v1/models', (req: Request, res: Response) => {
 });
 
 // GET /v1/models/full
-router.get('/v1/models/full', async (req: Request, res: Response) => {
+router.get('/v1/models/full', async (_req: Request, res: Response) => {
   try {
     const chatService = getChatService();
     const config = await chatService.getModels();
@@ -187,11 +185,7 @@ router.get('/v1/models/full', async (req: Request, res: Response) => {
     (config.loom_models || []).forEach((tag: string) => data.push(buildEntry(tag, 'loom')));
 
     // 确保 minimax / deepseek / glm 这几个常用模型始终存在于列表中
-    const staticModels = [
-      { id: 'maas-minimax-m2', type: 'chat', name: 'maas-minimax-m2', provider: 'minimax' },
-      { id: 'maas-deepseek-v3.1', type: 'chat', name: 'maas-deepseek-v3.1', provider: 'deepseek' },
-      { id: 'maas-glm-4.6', type: 'chat', name: 'maas-glm-4.6', provider: 'glm' },
-    ];
+    const staticModels = STATIC_CHAT_MODELS;
 
     for (const m of staticModels) {
       if (!data.some((d) => d.id === m.id)) {
@@ -209,14 +203,14 @@ router.get('/v1/models/full', async (req: Request, res: Response) => {
       }
     }
 
-    res.json({ object: 'list', data });
+    return res.json({ object: 'list', data });
   } catch (error: any) {
     if (error instanceof JihuAuthExpiredError) {
       return handleJihuAuthError(error, res);
     }
     // 统一处理错误消息，替换旧的 Python 命令
     const errorMsg = normalizeErrorMessage(error.message || 'Unknown error');
-    res.status(502).json({ detail: `拉取 CodeRider 模型配置失败: ${errorMsg}` });
+    return res.status(502).json({ detail: `拉取 CodeRider 模型配置失败: ${errorMsg}` });
   }
 });
 
@@ -226,42 +220,9 @@ router.post('/v1/messages', requireApiKey, async (req: Request, res: Response) =
     const payload = req.body;
     const apiKeyId = (req as any).apiKeyId;
 
-    // 转换Claude格式到OpenAI格式
-    const messages = payload.messages || [];
-    const openaiMessages = messages.map((msg: any) => {
-      if (msg.content && typeof msg.content === 'string') {
-        return { role: msg.role, content: msg.content };
-      }
-      if (Array.isArray(msg.content)) {
-        const textParts = msg.content
-          .filter((c: any) => c.type === 'text')
-          .map((c: any) => c.text)
-          .join('\n');
-        return { role: msg.role, content: textParts };
-      }
-      return { role: msg.role, content: '' };
-    });
-
-    // 模型映射
-    const modelMapping: Record<string, string> = {
-      'claude-3-5-sonnet-20241022': 'maas-minimax-m2',
-      'claude-3-5-haiku-20241022': 'maas-deepseek-v3.1',
-      'claude-3-opus-20240229': 'maas-glm-4.6',
-      'claude-sonnet-4-5-20250929': 'maas-minimax-m2',
-      'claude-haiku-4-5-20251001': 'maas-deepseek-v3.1',
-      'claude-opus-4-5-20251101': 'maas-glm-4.6',
-    };
-
-    const jihuModel = modelMapping[payload.model] || payload.model;
+    const { messages: openaiMessages, jihuModel, extraParams } = convertClaudeToOpenAI(payload);
 
     const chatService = getChatService();
-    const extraParams: any = {};
-    if (payload.max_tokens) extraParams.max_tokens = payload.max_tokens;
-    if (payload.temperature !== undefined) extraParams.temperature = payload.temperature;
-    if (payload.top_p !== undefined) extraParams.top_p = payload.top_p;
-    if (payload.top_k !== undefined) extraParams.top_k = payload.top_k;
-    if (payload.stop_sequences) extraParams.stop_sequences = payload.stop_sequences;
-
     const result = await chatService.chatCompletions(
       openaiMessages,
       jihuModel,
@@ -272,37 +233,26 @@ router.post('/v1/messages', requireApiKey, async (req: Request, res: Response) =
     // 记录用量
     if (result.usage && apiKeyId) {
       const apiKeyService = getApiKeyService();
-      apiKeyService.updateUsage(
+      await apiKeyService.updateUsage(
         apiKeyId,
         result.usage.prompt_tokens || 0,
         result.usage.completion_tokens || 0
       );
     }
 
-    // 转换为Claude格式响应
-    const claudeResponse = {
-      id: result.id || 'msg-' + Date.now(),
-      type: 'message',
-      role: 'assistant',
-      content: result.choices?.[0]?.message?.content ? [{ type: 'text', text: result.choices[0].message.content }] : [],
-      model: payload.model,
-      stop_reason: result.choices?.[0]?.finish_reason || 'end_turn',
-      stop_sequence: null,
-      usage: result.usage,
-    };
-
-    res.json(claudeResponse);
+    const claudeResponse = buildClaudeResponse(result, payload.model);
+    return res.json(claudeResponse);
   } catch (error: any) {
     if (error instanceof JihuAuthExpiredError) {
       return handleJihuAuthError(error, res);
     }
     const errorMsg = normalizeErrorMessage(error.message || 'Internal server error');
-    res.status(500).json({ detail: errorMsg });
+    return res.status(500).json({ detail: errorMsg });
   }
 });
 
 // GET /health
-router.get('/health', (req: Request, res: Response) => {
+router.get('/health', (_req: Request, res: Response) => {
   res.json({ status: 'ok' });
 });
 
@@ -323,14 +273,14 @@ router.post('/auth/register', async (req: Request, res: Response) => {
     const authService = getAuthService();
     const userRepo = getUserRepo();
 
-    if (userRepo.findByUsername(username)) {
+    if (await userRepo.findByUsername(username)) {
       return res.status(400).json({ detail: 'username already exists' });
     }
 
-    if (!userRepo.exists()) {
+    if (!(await userRepo.exists())) {
       const [userId, isAdmin] = await authService.register(username, password, false);
       const apiKeyService = getApiKeyService();
-      const [, key] = apiKeyService.create(userId, 'default');
+      const [, key] = await apiKeyService.create(userId, 'default');
       return res.json({
         user: { id: userId, username, is_admin: isAdmin },
         api_key: key,
@@ -339,8 +289,9 @@ router.post('/auth/register', async (req: Request, res: Response) => {
     }
     
     // 需要管理员批准
-    const registrationRepo = getRegistrationRepo();
-    const passwordHash = await PasswordService.hash(password);
+    const registrationRepo = getRegistrationService();
+    const passwordHasher = new BcryptPasswordHasher();
+    const passwordHash = await passwordHasher.hash(password);
     const request = {
       id: null,
       username,
@@ -348,9 +299,9 @@ router.post('/auth/register', async (req: Request, res: Response) => {
       createdAt: new Date(),
       status: 'pending' as const,
     };
-    registrationRepo.create(request);
+    await registrationRepo.create(request);
 
-    const admin = userRepo.findFirstAdmin();
+    const admin = await userRepo.findFirstAdmin();
     return res.json({
       pending_approval: true,
       message: 'Registration request created. Please wait for admin approval.',
@@ -358,7 +309,7 @@ router.post('/auth/register', async (req: Request, res: Response) => {
     });
   } catch (error: any) {
     const errorMsg = normalizeErrorMessage(error.message || 'Bad request');
-    res.status(400).json({ detail: errorMsg });
+    return res.status(400).json({ detail: errorMsg });
   }
 });
 
@@ -373,10 +324,10 @@ router.post('/auth/login', async (req: Request, res: Response) => {
     const authService = getAuthService();
     const session = await authService.login(username, password);
     const apiKeyService = getApiKeyService();
-    const keys = apiKeyService.listUserKeys(session.userId);
+    const keys = await apiKeyService.listUserKeys(session.userId);
 
     const userRepo = getUserRepo();
-    const user = userRepo.findByUsername(username);
+    const user = await userRepo.findByUsername(username);
 
     return res.json({
       user: { id: user?.id, username, is_admin: user?.isAdmin || false },
@@ -388,20 +339,20 @@ router.post('/auth/login', async (req: Request, res: Response) => {
     if (error.message?.includes('Invalid')) {
       return res.status(401).json({ detail: errorMsg });
     }
-    res.status(500).json({ detail: errorMsg });
+    return res.status(500).json({ detail: errorMsg });
   }
 });
 
 // POST /auth/logout
-router.post('/auth/logout', requireSession, (req: Request, res: Response) => {
+router.post('/auth/logout', requireSession, async (req: Request, res: Response) => {
   const token = req.headers['x-session-token'] as string;
   const sessionRepo = getSessionRepo();
-  sessionRepo.delete(token);
-  res.json({ status: 'ok' });
+  await sessionRepo.delete(token);
+  return res.json({ status: 'ok' });
 });
 
 // GET /auth/api-keys
-router.get('/auth/api-keys', requireApiKey, requireSession, (req: Request, res: Response) => {
+router.get('/auth/api-keys', requireApiKey, requireSession, async (req: Request, res: Response) => {
   const apiKeyRecord = (req as any).apiKeyRecord;
   const session = (req as any).session;
   
@@ -410,12 +361,12 @@ router.get('/auth/api-keys', requireApiKey, requireSession, (req: Request, res: 
   }
 
   const apiKeyService = getApiKeyService();
-  const keys = apiKeyService.listUserKeys(session.userId);
-  res.json({ api_keys: keys });
+  const keys = await apiKeyService.listUserKeys(session.userId);
+  return res.json({ api_keys: keys });
 });
 
 // POST /auth/api-keys
-router.post('/auth/api-keys', requireApiKey, requireSession, (req: Request, res: Response) => {
+router.post('/auth/api-keys', requireApiKey, requireSession, async (req: Request, res: Response) => {
   const apiKeyRecord = (req as any).apiKeyRecord;
   const session = (req as any).session;
   
@@ -425,58 +376,58 @@ router.post('/auth/api-keys', requireApiKey, requireSession, (req: Request, res:
 
   const { name } = req.body;
   const apiKeyService = getApiKeyService();
-  const [, key] = apiKeyService.create(session.userId, name);
-  res.json({ api_key: key });
+  const [, key] = await apiKeyService.create(session.userId, name);
+  return res.json({ api_key: key });
 });
 
 // GET /admin/api-keys
-router.get('/admin/api-keys', requireApiKey, requireSession, (req: Request, res: Response) => {
+router.get('/admin/api-keys', requireApiKey, requireSession, async (req: Request, res: Response) => {
   const apiKeyRecord = (req as any).apiKeyRecord;
   if (!apiKeyRecord.is_admin) {
     return res.status(403).json({ detail: 'admin only' });
   }
 
-  const apiKeyRepo = getApiKeyRepo();
-  const keys = apiKeyRepo.listAll();
-  res.json({ api_keys: keys });
+  const apiKeyService = getApiKeyService();
+  const keys = await apiKeyService.listAll();
+  return res.json({ api_keys: keys });
 });
 
 // GET /admin/registrations
-router.get('/admin/registrations', requireApiKey, requireSession, (req: Request, res: Response) => {
+router.get('/admin/registrations', requireApiKey, requireSession, async (req: Request, res: Response) => {
   const apiKeyRecord = (req as any).apiKeyRecord;
   if (!apiKeyRecord.is_admin) {
     return res.status(403).json({ detail: 'admin only' });
   }
 
-  const registrationRepo = getRegistrationRepo();
-  const requests = registrationRepo.listPending();
-  res.json({ registration_requests: requests });
+  const registrationService = getRegistrationService();
+  const requests = await registrationService.listPending();
+  return res.json({ registration_requests: requests });
 });
 
 // POST /admin/registrations/:id/approve
-router.post('/admin/registrations/:id/approve', requireApiKey, requireSession, (req: Request, res: Response) => {
+router.post('/admin/registrations/:id/approve', requireApiKey, requireSession, async (req: Request, res: Response) => {
   const apiKeyRecord = (req as any).apiKeyRecord;
   if (!apiKeyRecord.is_admin) {
     return res.status(403).json({ detail: 'admin only' });
   }
 
   const requestId = parseInt(req.params.id);
-  const registrationRepo = getRegistrationRepo();
-  registrationRepo.approve(requestId);
-  res.json({ status: 'ok' });
+  const registrationService = getRegistrationService();
+  await registrationService.approve(requestId);
+  return res.json({ status: 'ok' });
 });
 
 // POST /admin/registrations/:id/reject
-router.post('/admin/registrations/:id/reject', requireApiKey, requireSession, (req: Request, res: Response) => {
+router.post('/admin/registrations/:id/reject', requireApiKey, requireSession, async (req: Request, res: Response) => {
   const apiKeyRecord = (req as any).apiKeyRecord;
   if (!apiKeyRecord.is_admin) {
     return res.status(403).json({ detail: 'admin only' });
   }
 
   const requestId = parseInt(req.params.id);
-  const registrationRepo = getRegistrationRepo();
-  registrationRepo.reject(requestId);
-  res.json({ status: 'ok' });
+  const registrationService = getRegistrationService();
+  await registrationService.reject(requestId);
+  return res.json({ status: 'ok' });
 });
 
 // GET /auth/oauth-start
@@ -504,7 +455,7 @@ router.get('/auth/oauth-start', async (req: Request, res: Response) => {
   const callbackUrl = `${req.protocol}://${req.get('host')}/auth/oauth-callback`;
   const authUrl = `https://jihulab.com/oauth/authorize?client_id=${encodeURIComponent(clientId)}&redirect_uri=${encodeURIComponent(callbackUrl)}&response_type=code&scope=api`;
 
-  res.send(`
+  return res.send(`
     <!DOCTYPE html>
     <html>
     <head>
@@ -593,7 +544,7 @@ router.get('/auth/oauth-callback', async (req: Request, res: Response) => {
     const { getOAuthService } = await import('../infrastructure/dependencies.js');
     getOAuthService().clearCache();
 
-    res.send(`
+    return res.send(`
       <!DOCTYPE html>
       <html>
       <head><meta charset="utf-8"><title>OAuth Success</title></head>
@@ -606,13 +557,13 @@ router.get('/auth/oauth-callback', async (req: Request, res: Response) => {
     `);
   } catch (error: any) {
     const errorMsg = normalizeErrorMessage(error.message || 'OAuth error');
-    res.send(`<html><body><h1>OAuth Error</h1><p>${errorMsg}</p></body></html>`);
+    return res.send(`<html><body><h1>OAuth Error</h1><p>${errorMsg}</p></body></html>`);
   }
 });
 
 // POST /api/event_logging/batch (Claude Code兼容)
-router.post('/api/event_logging/batch', (req: Request, res: Response) => {
-  res.json({ status: 'ok' });
+router.post('/api/event_logging/batch', (_req: Request, res: Response) => {
+  res.json(buildEventLoggingResponse());
 });
 
 export default router;
