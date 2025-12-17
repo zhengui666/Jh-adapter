@@ -31,10 +31,22 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Verify wrangler installation
+        run: npx wrangler --version
+
+      - name: Check wrangler.toml
+        run: |
+          echo "Checking wrangler.toml..."
+          cat wrangler.toml
+          if grep -q "REPLACE_WITH_YOUR_D1_ID" wrangler.toml; then
+            echo "⚠️  Warning: D1 database_id is still a placeholder"
+          fi
+
       - name: Deploy to Cloudflare Workers
         uses: cloudflare/wrangler-action@v3
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           workingDirectory: .
+          command: deploy
 
