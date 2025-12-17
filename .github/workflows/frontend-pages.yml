@@ -36,8 +36,9 @@ jobs:
       - name: Build frontend
         working-directory: frontend
         env:
-          # 如需自定义后端地址，可在仓库 Secrets 或 Workflow 中覆盖此变量
-          VITE_API_BASE_URL: http://localhost:8000/v1
+          # 从 GitHub Repository Variables 读取后端 URL
+          # 需要在 GitHub 仓库 Settings → Secrets and variables → Actions → Variables 中配置 VITE_API_BASE_URL
+          VITE_API_BASE_URL: ${{ vars.VITE_API_BASE_URL || 'http://127.0.0.1:8000/v1' }}
           # 标记 GitHub Pages 构建，用于在 Vite 中设置 base 路径
           GITHUB_PAGES: "true"
         run: npm run build
