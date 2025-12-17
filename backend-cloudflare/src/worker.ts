@@ -40,13 +40,23 @@ function getCoderiderHost(env: Env): string {
 }
 
 async function getGitlabAccessToken(env: Env): Promise<string> {
-  const token = env.GITLAB_OAUTH_ACCESS_TOKEN;
-  if (!token) {
-    throw new JihuAuthExpiredError(
-      "GitLab access token missing; please set GITLAB_OAUTH_ACCESS_TOKEN in Cloudflare 环境变量",
-    );
+  // 优先从环境变量读取
+  const envToken = env.GITLAB_OAUTH_ACCESS_TOKEN;
+  if (envToken) {
+    return envToken;
   }
-  return token;
+
+  // 从 D1 settings 表读取
+  const db = env.DB as D1Database;
+  const settings = new D1SettingRepository(db);
+  const dbToken = await settings.get("access_token");
+  if (dbToken) {
+    return dbToken;
+  }
+
+  throw new JihuAuthExpiredError(
+    "GitLab access token missing; please set GITLAB_OAUTH_ACCESS_TOKEN in Cloudflare 环境变量，或访问 /auth/oauth-start 完成 OAuth 授权",
+  );
 }
 
 let cachedJwt: string | null = null;
@@ -771,6 +781,20 @@ app.post("/v1/messages", withApiKey, async (c: any) => {
     }
     return c.json({ detail: err.message || "Internal server error" }, 500);
   }
+});
+
+// 404 处理
+app.notFound((c) => {
+  return c.json({ detail: "Not Found" }, 404);
+});
+
+// 全局错误处理
+app.onError((err, c) => {
+  console.error("Worker error:", err);
+  if (err instanceof JihuAuthExpiredError) {
+    return buildJihuAuthExpiredResponse(c, err);
+  }
+  return c.json({ detail: err.message || "Internal server error" }, 500);
 });
 
 export default app;
