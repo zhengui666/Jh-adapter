@@ -182,6 +182,10 @@ app.post("/auth/login", async (c) => {
     const keys = await apiKeyService.listUserKeys(session.userId);
     const user = await userRepo.findByUsername(username);
 
+    if (!user) {
+      return c.json({ detail: "User not found after login" }, 500);
+    }
+
     return c.json({
       user: { id: user.id, username, is_admin: user.isAdmin || false },
       session_token: session.token,
@@ -229,19 +233,36 @@ async function withApiKey(c: any, next: () => Promise<Response>) {
       401,
     );
   }
+  
   const env = c.env as Env;
   const db = env.DB as D1Database;
+  
+  // 检查 D1 数据库绑定
+  if (!db) {
+    console.error("[withApiKey] D1 database not bound to Worker");
+    return c.json({ detail: "Database not configured" }, 500);
+  }
+  
   const apiKeyRepo = new D1ApiKeyRepository(db);
   try {
     const record = await apiKeyRepo.findByKey(apiKey);
     if (!record) {
-      throw new AuthenticationError("Invalid or inactive API key");
+      // 记录调试信息（不暴露完整 API Key）
+      const keyPrefix = apiKey.substring(0, 8);
+      console.warn(`[withApiKey] API key not found or inactive: ${keyPrefix}...`);
+      return c.json({ detail: "Invalid or inactive API key" }, 401);
     }
     c.set("apiKeyRecord", record);
     c.set("apiKeyId", record.id);
     return next();
-  } catch {
-    return c.json({ detail: "Invalid or inactive API key" }, 401);
+  } catch (err: any) {
+    // 区分不同类型的错误
+    if (err instanceof AuthenticationError) {
+      return c.json({ detail: err.message }, 401);
+    }
+    // 数据库错误
+    console.error("[withApiKey] Database error:", err?.message || String(err));
+    return c.json({ detail: "Database error during API key validation" }, 500);
   }
 }
 
