@@ -669,12 +669,7 @@ app.post("/v1/chat/completions", withApiKey, async (c: any) => {
   const payload = (await c.req.json().catch(() => ({}))) as any;
   const { messages, model, stream, extraParams } = splitChatPayload(payload);
 
-  if (stream) {
-    return c.json(
-      { detail: "Cloudflare backend currently does not support stream responses" },
-      400,
-    );
-  }
+  // 目前先忽略 stream 标志，一律按非流式处理，保证兼容 Cline/Claude 等默认 stream=true 的客户端
 
   try {
     const result = await callJihuChat(env, model, messages, extraParams);
