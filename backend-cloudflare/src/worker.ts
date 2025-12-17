@@ -102,6 +102,13 @@ async function getCoderiderJwt(env: Env): Promise<string> {
 }
 
 function stripModelPrefix(model: string): string {
+  for (const prefix of ["maas/", "server/"]) {
+    if (model.startsWith(prefix)) {
+      return model.slice(prefix.length);
+    }
+  }
+  return model;
+}
 
 function buildJihuAuthExpiredResponse(c: any, err: JihuAuthExpiredError) {
   return c.json(
@@ -115,14 +122,6 @@ function buildJihuAuthExpiredResponse(c: any, err: JihuAuthExpiredError) {
     },
     401,
   );
-}
-
-  for (const prefix of ["maas/", "server/"]) {
-    if (model.startsWith(prefix)) {
-      return model.slice(prefix.length);
-    }
-  }
-  return model;
 }
 
 // 健康检查
