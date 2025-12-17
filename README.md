@@ -210,11 +210,26 @@ docker compose down
 
 #### 方式 A：GitHub Actions 自动部署（推荐）
 
-1. **配置 GitHub Secrets**：
+1. **创建 Cloudflare API Token**：
+   - 访问 [Cloudflare Dashboard → API Tokens](https://dash.cloudflare.com/profile/api-tokens)
+   - 点击 **Create Token**
+   - 使用 **Edit Cloudflare Workers** 模板，或手动配置以下权限：
+     - **Account** → **Cloudflare Workers** → **Edit**
+     - **Account** → **Workers Scripts** → **Edit**
+     - **Account** → **Workers KV Storage** → **Edit**（如果使用 KV）
+     - **Account** → **D1** → **Edit**（如果使用 D1）
+     - **User** → **User Details** → **Read**（必需，用于验证身份）
+   - 创建后复制 Token（只显示一次）
+
+2. **获取 Cloudflare Account ID**：
+   - 在 [Cloudflare Dashboard](https://dash.cloudflare.com/) → **Workers & Pages**
+   - 右侧可以看到 **Account ID**
+
+3. **配置 GitHub Secrets**：
    - 进入 GitHub 仓库 → **Settings** → **Secrets and variables** → **Actions**
    - 添加以下 Secrets：
-     - `CLOUDFLARE_API_TOKEN`：在 [Cloudflare Dashboard](https://dash.cloudflare.com/profile/api-tokens) 创建 API Token，需要 `Workers:Edit` 权限
-     - `CLOUDFLARE_ACCOUNT_ID`：在 Cloudflare Dashboard → **Workers & Pages** → 右侧可以看到 Account ID
+     - `CLOUDFLARE_API_TOKEN`：步骤 1 创建的 API Token
+     - `CLOUDFLARE_ACCOUNT_ID`：步骤 2 获取的 Account ID
 
 2. **推送代码自动部署**：
    - 当 `backend-cloudflare/`、`wrangler.toml` 或 `package.json` 有变更时，GitHub Actions 会自动部署

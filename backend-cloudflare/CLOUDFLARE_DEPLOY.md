@@ -1,5 +1,23 @@
 # Cloudflare Workers 部署配置说明
 
+## 📋 部署方式
+
+### 方式 A：GitHub Actions 自动部署（推荐）
+
+1. **创建 Cloudflare API Token**（需要以下权限）：
+   - **Account** → **Cloudflare Workers** → **Edit**
+   - **Account** → **Workers Scripts** → **Edit**
+   - **Account** → **D1** → **Edit**（如果使用 D1）
+   - **User** → **User Details** → **Read**（必需）
+
+2. **配置 GitHub Secrets**：
+   - `CLOUDFLARE_API_TOKEN`：步骤 1 创建的 Token
+   - `CLOUDFLARE_ACCOUNT_ID`：在 Cloudflare Dashboard → **Workers & Pages** 右侧查看
+
+3. **自动部署**：推送代码到 `main` 分支时自动部署
+
+### 方式 B：Cloudflare 一键部署（手动）
+
 ## ⚠️ 重要：构建命令配置
 
 Cloudflare 一键部署按钮默认执行 `npx wrangler deploy`，但**不会自动安装依赖**。你需要在 Cloudflare Dashboard 中配置构建命令。
