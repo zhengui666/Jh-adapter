@@ -455,7 +455,7 @@ app.get("/auth/oauth-callback", async (c) => {
   const settings = new D1SettingRepository(db);
   const url = new URL(c.req.url);
 
-  const code = url.searchParams.get("?code");
+  const code = url.searchParams.get("code");
   const error = url.searchParams.get("error");
 
   if (error) {
