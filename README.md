@@ -1,416 +1,375 @@
-# Jihu CodeRider OpenAI Proxy
+## Jh-adapter
+一个把 **Jihu CodeRider** 的聊天能力封装成 **OpenAI / Claude 兼容 API** 的小型网关，同时内置用户体系、API Key 管理和简单管理界面，方便自建或团队内部使用。
 
-一个将 **Jihu CodeRider** 插件背后的聊天能力，以 **OpenAI Chat Completions 兼容接口** 暴露出来的代理服务，同时兼容 Claude Messages API，并提供用户管理和管理后台。
+---
 
-## ✨ 特性
+## 目录
 
-- 🚀 **OpenAI API 兼容**：支持标准的 `/v1/chat/completions` 和 `/v1/models` 接口
-- 🤖 **Claude API 兼容**：支持 `/v1/messages`（Claude Messages 格式）
-- 🔐 **用户体系**：注册 / 登录 / Session / API Key 管理 + 管理员审核
-- 📊 **用量统计**：按 API Key 记录 prompt / completion tokens 和请求次数
-- 🧱 **双后端实现**：
-  - `backend`：Node.js + Express + SQLite（适合自建或 Vercel 部署）
-  - `backend-cloudflare`：Cloudflare Workers + D1（适合 Cloudflare 部署）
-- 🎨 **前端管理界面**：Vue 3 + Vite + TypeScript
-- 🐳 **Docker 支持**：一键部署前后端服务
-- ☁️ **多平台部署**：支持 Docker、Vercel、Cloudflare Workers
+- **项目概览**
+- **功能特点**
+- **整体架构**
+- **快速启动**
+- **部署方案**
+- 使用 Docker
+- Node.js + Vercel + GitHub Pages
+- Cloudflare Workers + D1
+- **配置说明（环境变量）**
+- **前端使用说明**
+- **在 Claude Code 中使用**
+- **常见问题**
 
-## 🏗️ 项目结构
+---
 
-```
+## 项目概览
+
+- **目标**：提供一层兼容 OpenAI Chat Completions / Claude Messages 的 HTTP API，将请求转发到 Jihu CodeRider，方便各种客户端直接对接。
+- **后端形态**
+- `backend`：Node.js + Express + SQLite，适合本机 / Docker / Vercel 部署。
+- `backend-cloudflare`：Cloudflare Workers + D1，适合直接跑在 Cloudflare 边缘节点。
+- **前端**：`frontend`，基于 Vue 3 + Vite 的管理面板，用于注册、登录、API Key 管理以及简单对话调试。
+
+---
+
+## 功能特点
+
+- **OpenAI 风格接口**
+- `/v1/chat/completions`
+- `/v1/models`
+- `/v1/models/full`（包含模型元信息和部分静态扩展模型）
+
+- **Claude 风格接口**
+- `/v1/messages`
+
+- **账号与权限**
+- 注册 / 登录 / 退出登录
+- 管理员审核注册请求
+- 用户维度的 Session 管理
+
+- **API Key 管理**
+- 用户自助创建 / 启用 / 停用 API Key
+- 通过请求头 `X-API-Key` 使用
+
+- **用量统计**
+- 按 API Key 记录请求次数与 token 用量，便于后续配额和审计。
+
+- **多种部署方式**
+- 本机 / Docker 一键启动
+- Vercel（Node 后端）+ GitHub Pages（前端）
+- Cloudflare Workers + D1（无服务器部署）
+
+---
+
+## 整体架构
+
+项目根目录大致结构如下（只列出关键目录）：
+
+```text
 Jh-adapter/
-├── backend/                    # Node.js + SQLite 后端（Express，DDD）
-│   ├── src/
-│   │   ├── domain/            # 领域层（实体、值对象、异常）
-│   │   ├── application/       # 应用层（业务服务）
-│   │   ├── infrastructure/    # 基础设施层（Repository、外部服务、OAuth 脚本）
-│   │   ├── presentation/      # 表现层（Express 路由）
-│   │   └── index.ts           # 主入口
-│   ├── package.json
-│   └── tsconfig.json
-├── backend-cloudflare/         # Cloudflare Workers 版本后端
-│   ├── src/
-│   │   ├── d1-repositories.ts # 使用 D1 的 Repository 实现
-│   │   └── worker.ts          # Cloudflare Worker 主入口（Hono）
-│   ├── CLOUDFLARE_DEPLOY.md   # Cloudflare 部署配置指南
-│   ├── D1_DEPLOY.md           # D1 数据库部署指南
-│   ├── schema.sql             # D1 数据库初始化 SQL
-│   └── package.json
-├── frontend/                   # Vue 3 管理前端
-│   ├── src/
-│   │   ├── components/
-│   │   └── App.vue
-│   ├── index.html
-│   └── package.json
-├── docker-compose.yml          # 一键启动前后端（本地 + SQLite）
-├── docker-compose.dev.yml
-├── Dockerfile.backend
-├── Dockerfile.frontend
-├── wrangler.toml               # Cloudflare Workers 配置（入口：backend-cloudflare/src/worker.ts）
-├── package.json                # 根目录 package.json（用于 Cloudflare 部署）
-├── jihu_proxy.db               # SQLite 数据库（本地 / Docker 自动创建）
-├── jihu_oauth_config.json      # 本地 OAuth 配置（后端会同步到 SQLite）
-└── README.md
+backend/                 # Node.js + Express 后端（SQLite）
+backend-cloudflare/      # Cloudflare Workers 版本后端（D1）
+frontend/                # Vue 3 前端
+docker-compose.yml       # 一键启动（生产/演示）
+docker-compose.dev.yml   # 一键启动（开发联调）
+wrangler.toml            # Cloudflare Workers & D1 配置
+package.json             # Cloudflare 部署相关脚本
 ```
 
-## ⚙️ 技术栈
+### 后端（Node.js + SQLite，`backend/`）
 
-- **后端（Node 版）**：Node.js 20+、TypeScript、Express、SQLite、DDD
-- **后端（Cloudflare 版）**：Cloudflare Workers、D1、Hono、TypeScript
-- **前端**：Vue 3、Vite、TypeScript
+- 使用 Express 提供 HTTP API。
+- 使用 SQLite 持久化用户、API Key、用量统计与 OAuth 配置（默认数据库文件为根目录 `jihu_proxy.db`）。
+- `src/scripts/oauth-setup.ts` 提供本地 OAuth 初始化脚本，帮助获取访问 CodeRider 的 Access Token。
+
+### 后端（Cloudflare Workers + D1，`backend-cloudflare/`）
+
+- 使用 Hono 封装 Cloudflare Worker 路由。
+- 使用 D1 存储数据，表结构由 `schema.sql` 定义。
+- 覆盖与 Node 版一致的主要接口：
+- 认证与 API Key 管理
+- `/v1/models`、`/v1/models/full`
+- `/v1/chat/completions`（支持流式）
+- `/v1/messages`
+- OAuth Web 流程：`/auth/oauth-start`、`/auth/oauth-callback`
+
+### 前端（Vue 3 + Vite，`frontend/`）
+
+- 使用 Vue 3 + TypeScript 开发的单页应用。
+- 主要模块：
+- 登录 / 注册 / 登出
+- API Key 列表与创建
+- 模型列表与聊天调试面板
 
 ---
 
-## 📦 快速开始（本地运行）
+## 快速启动（本地）
 
-### 1. 安装依赖
+### 使用 Docker（推荐体验完整功能）
 
-```bash
-# 后端（Node + SQLite）
-cd backend
-npm install
-
-# 前端（可选：如果需要改动前端界面）
-cd ../frontend
-npm install
-```
-
-### 2. OAuth 配置（首次使用）
+前置条件：本机安装 Docker（Docker Desktop 即可）。
 
 ```bash
-cd backend
-npm run oauth-setup
-```
+git clone <你的仓库地址>
+cd Jh-adapter
 
-脚本会引导你：
-
-1. 在 [Jihu GitLab](https://jihulab.com/-/user_settings/applications) 创建 OAuth 应用
-2. 填写 Application ID 和 Secret
-3. 自动打开浏览器完成授权
-4. 将配置写入 `jihu_oauth_config.json`，并同步到 SQLite
-
-### 3. 启动服务
-
-**后端（Node 版）**：
-
-```bash
-cd backend
-npm run dev        # 开发模式
-# 或
-npm run build && npm start   # 生产模式
-```
-
-**前端（管理界面）**：
-
-```bash
-cd frontend
-npm run dev
-```
-
-默认端口：
-
-- 后端 API：`http://127.0.0.1:8000`
-- 前端界面：`http://127.0.0.1:5173`
-
----
-
-## 🐳 方式一：Docker 一键部署（推荐自建）
-
-```bash
-# 在项目根目录
+# 启动前后端 + SQLite
 docker compose up -d
 ```
 
-启动后：
+典型默认端口（以实际配置为准）：
 
-- 后端 API：`http://127.0.0.1:8000`
-- 前端界面：`http://127.0.0.1:5173`
+- 后端 API：`http://127.0.0.1:8000/v1`
+- 前端页面：`http://127.0.0.1:5173`
 
-持久化文件：
-
-- `./jihu_proxy.db` - 用户 / API Key / 使用统计
-- `./jihu_oauth_config.json` - OAuth 配置和令牌
-
-查看日志：
-
-```bash
-docker compose logs -f         # 全部
-# 或
-docker compose logs -f backend
-```
-
-停止：
+停止服务：
 
 ```bash
 docker compose down
 ```
 
----
-
-## ☁️ 方式二：后端部署到 Vercel，前端部署到 GitHub Pages
-
-**1. 一键部署后端到 Vercel（Node + SQLite）**
-
-[![Deploy Backend to Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2Fzhengui666%2FJh-adapter&project-name=jh-adapter-backend&repository-name=Jh-adapter&root-directory=backend)
-
-部署完成后，记下 Vercel 域名，例如：
-
-- `https://jh-adapter-backend-xxx.vercel.app`
-
-**2. 前端部署到 GitHub Pages**
-
-- 使用 GitHub Actions（例如 `frontend-pages.yml`）构建前端
-- 在构建时注入环境变量 `VITE_API_BASE_URL` 为 Vercel 后端地址的 `/v1`：
-  - 例如：`https://jh-adapter-backend-xxx.vercel.app/v1`
-
-前端重新部署后，GitHub Pages 上的页面会直接请求 Vercel 上的后端。
-
-> ⚠️ **注意**：Vercel 上的 SQLite 存储不适合高强度长时间使用，推荐用作演示或轻负载环境。
+如需只启动部分组件或用于开发联调，可以参考 `docker-compose.dev.yml`。
 
 ---
 
-## ☁️ 方式三：后端部署到 Cloudflare Workers（D1）
+### 直接启动 Node 后端 + 前端
 
-本仓库根目录提供 `wrangler.toml`，入口为 `backend-cloudflare/src/worker.ts`，已经实现完整的：
-
-- 认证：`/auth/register`、`/auth/login`、`/auth/logout`
-- API Key：`/auth/api-keys`（用户）、`/admin/api-keys`（管理员）
-- 注册审核：`/admin/registrations` 系列接口
-- OAuth：`/auth/oauth-start`、`/auth/oauth-callback`
-- LLM：`/v1/models`、`/v1/models/full`、`/v1/chat/completions`、`/v1/messages`
-- 健康检查：`/health`
-
-### 1. 创建并初始化 Cloudflare D1 数据库
-
-**详细步骤请参考：[D1 部署指南](./backend-cloudflare/D1_DEPLOY.md)**
-
-快速步骤：
-
-1. **创建 D1 数据库**（在 Cloudflare Dashboard 或使用 CLI）：
-   ```bash
-   wrangler d1 create JH_ADAPTER_DB
-   ```
-
-2. **更新 `wrangler.toml`**，填入 `database_id`：
-   ```toml
-   [[d1_databases]]
-   binding = "DB"
-   database_name = "JH_ADAPTER_DB"
-   database_id = "你的 D1 ID"  # 从步骤 1 获取
-   ```
-
-3. **初始化数据库 Schema**：
-   ```bash
-   wrangler d1 execute JH_ADAPTER_DB --file=backend-cloudflare/schema.sql
-   ```
-
-### 2. 部署到 Cloudflare
-
-有两种部署方式：
-
-#### 方式 A：GitHub Actions 自动部署（推荐）
-
-1. **创建 Cloudflare API Token**：
-   - 访问 [Cloudflare Dashboard → API Tokens](https://dash.cloudflare.com/profile/api-tokens)
-   - 点击 **Create Token**
-   - 使用 **Edit Cloudflare Workers** 模板，或手动配置以下权限：
-     - **Account** → **Cloudflare Workers** → **Edit**
-     - **Account** → **Workers Scripts** → **Edit**
-     - **Account** → **Workers KV Storage** → **Edit**（如果使用 KV）
-     - **Account** → **D1** → **Edit**（如果使用 D1）
-     - **User** → **User Details** → **Read**（必需，用于验证身份）
-   - 创建后复制 Token（只显示一次）
-
-2. **获取 Cloudflare Account ID**：
-   - 在 [Cloudflare Dashboard](https://dash.cloudflare.com/) → **Workers & Pages**
-   - 右侧可以看到 **Account ID**
-
-3. **配置 GitHub Secrets**：
-   - 进入 GitHub 仓库 → **Settings** → **Secrets and variables** → **Actions**
-   - 添加以下 Secrets：
-     - `CLOUDFLARE_API_TOKEN`：步骤 1 创建的 API Token
-     - `CLOUDFLARE_ACCOUNT_ID`：步骤 2 获取的 Account ID
-
-2. **推送代码自动部署**：
-   - 当 `backend-cloudflare/`、`wrangler.toml` 或 `package.json` 有变更时，GitHub Actions 会自动部署
-   - 查看部署状态：GitHub 仓库 → **Actions** 标签
-
-#### 方式 B：Cloudflare 一键部署（手动触发）
-
-[![Deploy Backend to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https%3A%2F%2Fgithub.com%2Fzhengui666%2FJh-adapter&projectName=jh-adapter-backend-cloudflare)
-
-**⚠️ 重要：配置构建命令和根目录**
-
-Cloudflare 一键部署默认不会自动安装依赖。部署后，需要在 Cloudflare Dashboard 中配置：
-
-1. 进入 **Workers & Pages** → 你的项目 → **Settings** → **Builds & deployments**
-2. **检查 Root directory**：确保设置为 **空** 或 **`.`**（仓库根目录），**不要**设置为 `backend-cloudflare`
-3. **配置 Build command**：设置为 `npm install && npx wrangler deploy`
-4. 保存并重新触发部署
-
-**详细说明请参考：[Cloudflare 部署配置指南](./backend-cloudflare/CLOUDFLARE_DEPLOY.md)**
-
-Cloudflare 会以仓库根目录为项目根，自动读取 `wrangler.toml`，入口是 `backend-cloudflare/src/worker.ts`。
-
-### 3. 配置环境变量
-
-在 Cloudflare Workers 的 **Settings → Variables** 中配置：
-
-- `CODERIDER_HOST`（可选，默认 `https://coderider.jihulab.com`）
-- `GITLAB_OAUTH_CLIENT_ID`（可选，配合 `/auth/oauth-start` 使用）
-- `GITLAB_OAUTH_CLIENT_SECRET`（可选）
-- `GITLAB_OAUTH_ACCESS_TOKEN`（可选，若不走网页 OAuth，可直接填入）
-
-> Cloudflare 版会优先使用你配置的 GitLab OAuth 令牌，无法使用本地文件系统。
-
-### 4. 让前端指向 Cloudflare 后端
-
-假设 Worker 域名为：
-
-- `https://your-worker.your-subdomain.workers.dev`
-
-则在前端构建时设置：
+#### 1. 启动 Node 后端
 
 ```bash
-VITE_API_BASE_URL="https://your-worker.your-subdomain.workers.dev/v1"
+cd Jh-adapter/backend
+npm install
+npm run build
+npm run start   # 默认监听 8000 端口
 ```
 
----
-
-## 🔌 API 使用示例
-
-### OpenAI Chat Completions
-
-```python
-from openai import OpenAI
-
-client = OpenAI(
-    base_url="http://127.0.0.1:8000/v1",  # 或 Cloudflare / Vercel 地址
-    api_key="your-api-key",
-)
-
-resp = client.chat.completions.create(
-    model="maas-minimax-m2",  # 或 maas-deepseek-v3.1, maas-glm-4.6
-    messages=[{"role": "user", "content": "你好，请介绍一下自己"}],
-    stream=False,
-)
-
-print(resp.choices[0].message.content)
-```
-
-### Claude Messages 兼容接口
+#### 2. 初始化 OAuth（建议执行一次）
 
 ```bash
-curl -X POST http://127.0.0.1:8000/v1/messages \
-  -H "Content-Type: application/json" \
-  -H "X-API-Key: your-api-key" \
-  -d '{
-    "model": "claude-sonnet-4-5-20250929",
-    "max_tokens": 512,
-    "messages": [
-      {"role": "user", "content": "Hello"}
-    ]
-  }'
+cd Jh-adapter/backend
+npm run oauth-setup
 ```
 
-### 模型列表
+脚本会引导你完成 GitLab / Jihu 授权，并在本地写入配置文件，后端启动时会自动读取。
+
+#### 3. 启动前端
 
 ```bash
-# 简单列表
-curl http://127.0.0.1:8000/v1/models
-
-# 完整列表
-curl http://127.0.0.1:8000/v1/models/full
+cd Jh-adapter/frontend
+npm install
+npm run dev
 ```
 
----
+浏览器访问 `http://127.0.0.1:5173` 即可进入管理界面。
 
-## 🤖 搭配 Claude Code 使用
-
-可以把本项目作为 Claude Code 的“自托管代理后端”。
-
-### 环境变量
+前端调用的后端地址由 `VITE_API_BASE_URL` 控制，开发环境可以在 `frontend/.env.local` 里设置，例如：
 
 ```bash
-export ANTHROPIC_BASE_URL="http://127.0.0.1:8000"      # 或 Cloudflare/Vercel 地址
-export ANTHROPIC_API_KEY="your-api-key"               # 在本项目中创建的 API Key
-
-claude  # 启动 Claude Code
+VITE_API_BASE_URL=http://127.0.0.1:8000/v1
 ```
 
-### 支持的模型别名
+---
 
-在 Claude Code 中可以使用：
+## 部署方案
 
-- `claude-sonnet-4-5-20250929` → `maas-minimax-m2`
-- `claude-haiku-4-5-20251001` → `maas-deepseek-v3.1`
-- `claude-opus-4-5-20251101` → `maas-glm-4.6`
+### 使用 Docker（自建服务器）
+
+在服务器上执行与本地类似的步骤：
+
+```bash
+git clone <你的仓库地址>
+cd Jh-adapter
+docker compose up -d
+```
+
+可按需修改 `docker-compose.yml` 中的端口映射、数据卷等配置。
 
 ---
 
-## 🔐 用户与权限
+### Node 后端部署到 Vercel，前端部署到 GitHub Pages
 
-- 第一个注册的用户自动成为管理员
-- 之后的注册需要管理员审核（通过 `/admin/registrations` 接口或前端管理界面）
-- 管理员可查看所有 API Key，用于团队共享 / 限流
+#### 1. 将 `backend` 部署到 Vercel
 
----
+- 在 Vercel 控制台中新建项目，Git 仓库指向本项目。
+- Root directory 选择 `backend`。
+- 构建命令可设置为：
+- `npm install`
+- `npm run build && npm run start`
 
-## 📚 相关文档
+部署完成后，记下 Vercel 提供的域名，例如：
 
-- [Cloudflare D1 数据库部署指南](./backend-cloudflare/D1_DEPLOY.md) - 详细的 D1 创建和初始化步骤
-- [Cloudflare 部署配置指南](./backend-cloudflare/CLOUDFLARE_DEPLOY.md) - 构建命令和环境变量配置
-- [后端 README](./backend/README.md) - Node.js 后端的详细说明
+```text
+https://<your-backend>.vercel.app
+```
 
----
+后端 API 前缀即为 `https://<your-backend>.vercel.app/v1`。
 
-## ⚠️ 安全提示
+#### 2. 使用 GitHub Pages 部署前端
 
-- 生产环境务必使用 HTTPS
-- 不要将真实的 GitLab OAuth Client Secret / Access Token 提交到 Git 仓库
-- 定期轮换 API Key，限制其权限和可见范围
-- 备份 SQLite 数据库（`jihu_proxy.db`）或在 D1 上做好备份策略
+仓库中包含 GitHub Actions 工作流（例如 `.github/workflows/frontend-pages.yml`），会在推送到 `main` 时自动：
 
----
+- 安装前端依赖
+- 构建前端
+- 将 `frontend/dist` 发布到 GitHub Pages
 
-## 🐛 故障排查
+只需在 GitHub 仓库 **Settings → Secrets and variables → Actions → Variables** 中设置：
 
-### OAuth 认证失败
+```text
+VITE_API_BASE_URL=https://<your-backend>.vercel.app/v1
+```
 
-1. 检查 `jihu_oauth_config.json` 是否存在且格式正确
-2. 运行 `npm run oauth-setup` 重新配置
-3. 确认 GitLab 应用的 Redirect URI 设置正确
-
-### 数据库连接问题
-
-- 确保 `jihu_proxy.db` 文件有读写权限
-- 在 Docker 环境中，检查 volume 挂载是否正确
-- Cloudflare D1：确认 `wrangler.toml` 中的 `database_id` 正确
-
-### 前端无法连接后端
-
-- 检查 `VITE_API_BASE_URL` 环境变量是否正确
-- 在 Docker 环境中，确保前端容器能访问 `backend` 服务
-- 检查浏览器控制台的网络请求错误
-
-### Cloudflare 部署问题
-
-- 参考 [Cloudflare 部署配置指南](./backend-cloudflare/CLOUDFLARE_DEPLOY.md)
-- 确认 Root directory 和 Build command 配置正确
-- 检查部署日志中的错误信息
+之后前端重新部署即可指向 Vercel 上的后端。
 
 ---
 
-## 📄 许可证
+### Cloudflare Workers + D1
 
-本项目使用 MIT 许可证，欢迎 Fork 和二次开发。
+Cloudflare 方案使用 `backend-cloudflare` 中的 Worker 代码和 D1 数据库，整体行为尽量与 Node 版本保持一致。
+
+#### 1. 创建并配置 D1 数据库
+
+可以使用 Cloudflare Dashboard 或 `wrangler` CLI 创建：
+
+```bash
+wrangler d1 create JH_ADAPTER_DB
+```
+
+创建完成后，在 Dashboard 中复制该数据库的 **Database ID**，并在项目根目录的 `wrangler.toml` 中填写：
+
+```toml
+[[d1_databases]]
+binding = "DB"
+database_name = "JH_ADAPTER_DB"
+database_id = "<你的 D1 Database ID>"
+```
+
+初始化表结构：
+
+```bash
+wrangler d1 execute JH_ADAPTER_DB --file=backend-cloudflare/schema.sql
+```
+
+#### 2. 部署到 Cloudflare
+
+本地执行：
+
+```bash
+cd Jh-adapter
+npm install
+npx wrangler deploy
+```
+
+部署成功后会得到一个 Workers 域名，例如：
+
+```text
+https://<your-worker>.workers.dev
+```
+
+此时后端 API 前缀为 `https://<your-worker>.workers.dev/v1`。
+
+> 出于安全考虑，请不要在公开仓库或文档中写入你的真实 Worker 域名，可在私有配置或 CI 变量中维护。
+
+#### 3. 自动部署（可选）
+
+你可以：
+
+- 在 Cloudflare 控制台中使用 “连接到 Git 仓库”，让 Cloudflare 直接监控 `main` 分支并自动构建 / 部署；或
+- 使用 `.github/workflows/deploy-cloudflare.yml`，通过 GitHub Actions 在每次 `push` 到 `main` 时执行 `wrangler deploy`。
 
 ---
 
-## 🤝 贡献
+## 配置说明（环境变量）
 
-欢迎提交 Issue 和 Pull Request！
+### Node 后端（`backend`）
+
+常用环境变量示例：
+
+- `PORT`：监听端口，默认 `8000`。
+- `DATABASE_PATH`：SQLite 文件路径，默认根目录 `jihu_proxy.db`。
+- `CODERIDER_HOST`：CodeRider 服务地址（一般为官方域名）。
+- OAuth 相关的 Client ID / Secret，可以放在 `.env` 中，由后端配置模块读取。
+
+### Cloudflare 后端（`backend-cloudflare`）
+
+在 Cloudflare Dashboard → 你的 Worker → **Settings → Variables** 中配置：
+
+- `CODERIDER_HOST`：CodeRider 服务地址（可选，默认使用官方地址）。
+- `GITLAB_OAUTH_CLIENT_ID`、`GITLAB_OAUTH_CLIENT_SECRET`：用于网页 OAuth 授权。
+- `GITLAB_OAUTH_ACCESS_TOKEN`：如果不想走网页流程，可以直接填入 Access Token。
+
+Cloudflare Worker 会：
+
+1. 优先从 D1 数据库的 `settings` 表中读取 Access Token。
+2. 如果数据库中不存在，则回退到环境变量。
+3. 发现 token 失效时，返回结构化错误 JSON，引导你重新授权或更新配置。
 
 ---
 
-**注意**：本项目仅用于学习和研究目的，请遵守 Jihu CodeRider 的使用条款。
+## 前端使用说明
+
+### 本地开发
+
+```bash
+cd Jh-adapter/frontend
+npm install
+npm run dev
+```
+
+浏览器访问 `http://127.0.0.1:5173`，即可使用：
+
+- 登录 / 注册 / 登出
+- 申请 / 管理 API Key
+- 在聊天面板中测试后端接口
+
+### 构建与部署
+
+```bash
+cd Jh-adapter/frontend
+npm run build
+```
+
+构建产物位于 `frontend/dist`，可部署到任意静态托管（Nginx、GitHub Pages 等）。
+
+在构建前设置：
+
+```bash
+VITE_API_BASE_URL=<你的后端地址>/v1
+```
+
+即可让前端连接到对应的后端实例。
+
+---
+
+## 在 Claude Code 中使用
+
+本项目可以作为 Claude Code 的自定义 OpenAI 兼容后端，典型使用流程如下：
+
+1. 选择一种部署方式启动后端（Node / Cloudflare 均可）。
+2. 在前端界面中创建一个 API Key，并妥善保存。
+3. 在 Claude Code 的模型配置中：
+- 将 Base URL 设置为你的后端地址（例如 `https://<your-backend>/v1`）。
+- 将 API Key 设置为刚才创建的值（在请求中会被映射为 `X-API-Key`）。
+- 模型名称使用 `/v1/models` 或 `/v1/models/full` 返回的任一模型 ID。
+4. 保存配置后，即可通过本代理在 Claude Code 中调用 Jihu CodeRider。
+
+请确保不要在公开仓库、截图或日志中泄露你的后端地址和 API Key。
+
+---
+
+## 常见问题（FAQ）
+
+- **Cloudflare 日志中出现 D1 相关的 10021 错误？**  
+通常是 `wrangler.toml` 中的 `database_id` 仍为占位符，请到 Cloudflare D1 控制台复制真实 ID 后填入。
+
+- **前端总是请求 `localhost`？**  
+请检查构建前是否正确设置 `VITE_API_BASE_URL`，尤其是使用 GitHub Actions 构建 GitHub Pages 时，需要在仓库变量中设置该值。
+
+- **调用 `/v1/models/full` 或聊天接口返回认证过期错误？**  
+说明 GitLab / Jihu 的 Access Token 失效或未配置，请重新运行 OAuth 脚本或在环境变量 / D1 中更新 token。
+
+---
+
+## 贡献与许可
+
+- 欢迎通过 Issue / Pull Request 提交 Bug 反馈或功能改进建议。
+- 具体许可信息以仓库根目录中的 `LICENSE` 文件为准；如未提供，则默认保留作者所有权利。
+
+
