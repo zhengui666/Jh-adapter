@@ -24,6 +24,9 @@ const app = new Hono<{ Bindings: Env }>();
 // 全局 CORS，允许前端站点跨域访问 Worker API
 app.use("/*", cors({ origin: "*", allowMethods: ["GET", "POST", "OPTIONS"], allowHeaders: ["Content-Type", "X-API-Key", "X-Session-Token"] }));
 
+// 处理所有路径的 OPTIONS 预检请求
+app.options("/*", (c) => c.text("", 204));
+
 // 简单密码工具（Cloudflare 使用 Web Crypto）
 async function hashPassword(password: string): Promise<string> {
   const enc = new TextEncoder();
