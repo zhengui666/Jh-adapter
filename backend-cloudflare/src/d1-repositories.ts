@@ -9,6 +9,8 @@ import type {
   ApiKeyRepository,
   SessionRepository,
   RegistrationRequestRepository,
+  RequestLogRepository,
+  RequestLog,
 } from '../../backend/src/infrastructure/repositories.js';
 import type { User, ApiKey, Session, RegistrationRequest } from '../../backend/src/domain/entities.js';
 
@@ -291,6 +293,39 @@ export class D1SettingRepository {
       )
       .bind(key, value)
       .run();
+  }
+}
+
+export class D1RequestLogRepository implements RequestLogRepository {
+  constructor(private db: D1Database) {}
+
+  async create(log: RequestLog): Promise<number> {
+    const now = new Date().toISOString();
+    const result = await this.db
+      .prepare(
+        `INSERT INTO api_request_logs(api_key_id, method, path, request_body, response_body, status_code, created_at)
+         VALUES(?, ?, ?, ?, ?, ?, ?) RETURNING id`
+      )
+      .bind(
+        log.apiKeyId,
+        log.method,
+        log.path,
+        log.requestBody,
+        log.responseBody,
+        log.statusCode,
+        now
+      )
+      .first<any>();
+    return Number(result.id);
+  }
+
+  async cleanupOlderThan(hours: number): Promise<number> {
+    const cutoffTime = new Date(Date.now() - hours * 60 * 60 * 1000).toISOString();
+    const result = await this.db
+      .prepare('DELETE FROM api_request_logs WHERE created_at < ?')
+      .bind(cutoffTime)
+      .run();
+    return result.meta.changes || 0;
   }
 }
 

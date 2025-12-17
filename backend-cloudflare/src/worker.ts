@@ -7,6 +7,7 @@ import {
   D1SessionRepository,
   D1RegistrationRequestRepository,
   D1SettingRepository,
+  D1RequestLogRepository,
   type D1Env,
 } from "./d1-repositories";
 import { AuthenticationError, JihuAuthExpiredError } from "../../backend/src/domain/exceptions";
@@ -263,6 +264,120 @@ async function withApiKey(c: any, next: () => Promise<Response>) {
     // 数据库错误
     console.error("[withApiKey] Database error:", err?.message || String(err));
     return c.json({ detail: "Database error during API key validation" }, 500);
+  }
+}
+
+// 工具函数：限制字符串长度，避免存储过大的请求/响应体
+function truncateString(str: string | null | undefined, maxLength: number = 10000): string | null {
+  if (!str) return null;
+  if (str.length <= maxLength) return str;
+  return str.substring(0, maxLength) + `... [truncated, original length: ${str.length}]`;
+}
+
+// 自动清理超过24小时的日志（异步执行，不阻塞请求）
+async function cleanupOldLogs(db: D1Database) {
+  try {
+    const logRepo = new D1RequestLogRepository(db);
+    const deletedCount = await logRepo.cleanupOlderThan(24);
+    if (deletedCount > 0) {
+      console.log(`[RequestLog] Cleaned up ${deletedCount} old log entries (older than 24h)`);
+    }
+  } catch (err: any) {
+    console.error("[RequestLog] Cleanup error:", err?.message || String(err));
+  }
+}
+
+// 中间件：请求日志记录
+async function withRequestLogging(c: any, next: () => Promise<Response>) {
+  const env = c.env as Env;
+  const db = env.DB as D1Database;
+  const apiKeyId = c.get("apiKeyId") || null;
+  const method = c.req.method;
+  const path = c.req.path;
+  
+  // 异步触发清理（不等待完成）
+  cleanupOldLogs(db).catch(() => {});
+
+  let requestBody: string | null = null;
+  let responseBody: string | null = null;
+  let statusCode = 500;
+
+  try {
+    // 尝试读取请求体（对于 POST/PUT/PATCH 请求）
+    if (["POST", "PUT", "PATCH"].includes(method)) {
+      try {
+        const body = await c.req.clone().json().catch(() => null);
+        if (body) {
+          requestBody = truncateString(JSON.stringify(body));
+        }
+      } catch {
+        // 忽略请求体读取错误
+      }
+    }
+
+    // 执行下一个中间件/处理器
+    const response = await next();
+    statusCode = response.status;
+
+    // 尝试读取响应体
+    try {
+      const clonedResponse = response.clone();
+      const contentType = clonedResponse.headers.get("content-type") || "";
+      if (contentType.includes("application/json")) {
+        const body = await clonedResponse.json().catch(() => null);
+        if (body) {
+          responseBody = truncateString(JSON.stringify(body));
+        }
+      } else {
+        // 对于非 JSON 响应，尝试读取文本（限制长度）
+        const text = await clonedResponse.text().catch(() => null);
+        if (text) {
+          responseBody = truncateString(text, 5000);
+        }
+      }
+    } catch {
+      // 忽略响应体读取错误
+    }
+
+    // 异步记录日志（不阻塞响应）
+    if (db) {
+      const logRepo = new D1RequestLogRepository(db);
+      logRepo
+        .create({
+          id: null,
+          apiKeyId,
+          method,
+          path,
+          requestBody,
+          responseBody,
+          statusCode,
+          createdAt: new Date(),
+        })
+        .catch((err: any) => {
+          console.error("[RequestLog] Failed to log request:", err?.message || String(err));
+        });
+    }
+
+    return response;
+  } catch (err: any) {
+    statusCode = err.status || 500;
+    // 记录错误响应
+    if (db) {
+      const logRepo = new D1RequestLogRepository(db);
+      logRepo
+        .create({
+          id: null,
+          apiKeyId,
+          method,
+          path,
+          requestBody,
+          responseBody: truncateString(JSON.stringify({ error: err.message || String(err) })),
+          statusCode,
+          createdAt: new Date(),
+        })
+        .catch(() => {});
+    }
+    throw err;
   }
 }
 
@@ -682,7 +797,7 @@ async function callJihuChat(
 }
 
 // Chat Completions（OpenAI 兼容：返回 content-part 数组，兼容 Cline 等客户端）
-app.post("/v1/chat/completions", withApiKey, async (c: any) => {
+app.post("/v1/chat/completions", withApiKey, withRequestLogging, async (c: any) => {
   const env = c.env as Env;
   const apiKeyId = c.get("apiKeyId");
   const db = env.DB as D1Database;
@@ -714,7 +829,7 @@ app.post("/v1/chat/completions", withApiKey, async (c: any) => {
 });
 
 // POST /v1/messages (Claude API兼容)
-app.post("/v1/messages", withApiKey, async (c: any) => {
+app.post("/v1/messages", withApiKey, withRequestLogging, async (c: any) => {
   const env = c.env as Env;
   const apiKeyId = c.get("apiKeyId");
   const db = env.DB as D1Database;

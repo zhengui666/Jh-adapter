@@ -49,3 +49,19 @@ CREATE TABLE IF NOT EXISTS sessions (
   FOREIGN KEY(user_id) REFERENCES users(id)
 );
 
+-- API 请求日志表：记录接口的请求和响应
+CREATE TABLE IF NOT EXISTS api_request_logs (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  api_key_id INTEGER,
+  method TEXT NOT NULL,
+  path TEXT NOT NULL,
+  request_body TEXT,
+  response_body TEXT,
+  status_code INTEGER NOT NULL,
+  created_at TEXT NOT NULL,
+  FOREIGN KEY(api_key_id) REFERENCES api_keys(id)
+);
+
+-- 为 created_at 创建索引，用于快速查询和清理旧数据
+CREATE INDEX IF NOT EXISTS idx_api_request_logs_created_at ON api_request_logs(created_at);
+
