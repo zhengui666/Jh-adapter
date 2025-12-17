@@ -9,6 +9,7 @@ on:
       - 'wrangler.toml'
       - 'package.json'
       - 'package-lock.json'
+      - '.github/workflows/deploy-cloudflare.yml'
   workflow_dispatch:
 
 permissions:
