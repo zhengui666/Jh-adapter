@@ -207,11 +207,26 @@ app.post("/auth/logout", async (c) => {
   return c.json({ status: "ok" });
 });
 
+// 从请求头中提取 API Key，兼容 X-API-Key 和 Authorization: Bearer
+function getApiKeyFromHeaders(c: any): string | null {
+  const headerKey = c.req.header("x-api-key") || c.req.header("X-API-Key");
+  if (headerKey) return headerKey;
+
+  const auth = c.req.header("authorization") || c.req.header("Authorization");
+  if (auth && auth.startsWith("Bearer ")) {
+    return auth.slice("Bearer ".length).trim();
+  }
+  return null;
+}
+
 // 中间件：API Key
 async function withApiKey(c: any, next: () => Promise<Response>) {
-  const apiKey = c.req.header("x-api-key");
+  const apiKey = getApiKeyFromHeaders(c);
   if (!apiKey) {
-    return c.json({ detail: "Missing X-API-Key header" }, 401);
+    return c.json(
+      { detail: "Missing API key (X-API-Key header or Authorization: Bearer)" },
+      401,
+    );
   }
   const env = c.env as Env;
   const db = env.DB as D1Database;
