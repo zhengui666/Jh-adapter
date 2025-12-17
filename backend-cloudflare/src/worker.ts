@@ -625,10 +625,15 @@ app.get("/v1/models/full", async (c) => {
 
     return c.json({ object: "list", data });
   } catch (err: any) {
+    console.error("v1/models/full error:", err);
     if (err instanceof JihuAuthExpiredError) {
       return buildJihuAuthExpiredResponse(c, err);
     }
-    return c.json({ detail: err.message || "Unknown error" }, 502);
+    return c.json({ 
+      detail: err.message || "Unknown error",
+      error: err.name || "InternalServerError",
+      stack: err.stack 
+    }, 500);
   }
 });
 
