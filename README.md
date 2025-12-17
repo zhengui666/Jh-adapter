@@ -204,7 +204,23 @@ docker compose down
    wrangler d1 execute JH_ADAPTER_DB --file=backend-cloudflare/schema.sql
    ```
 
-### 2. 一键部署到 Cloudflare
+### 2. 部署到 Cloudflare
+
+有两种部署方式：
+
+#### 方式 A：GitHub Actions 自动部署（推荐）
+
+1. **配置 GitHub Secrets**：
+   - 进入 GitHub 仓库 → **Settings** → **Secrets and variables** → **Actions**
+   - 添加以下 Secrets：
+     - `CLOUDFLARE_API_TOKEN`：在 [Cloudflare Dashboard](https://dash.cloudflare.com/profile/api-tokens) 创建 API Token，需要 `Workers:Edit` 权限
+     - `CLOUDFLARE_ACCOUNT_ID`：在 Cloudflare Dashboard → **Workers & Pages** → 右侧可以看到 Account ID
+
+2. **推送代码自动部署**：
+   - 当 `backend-cloudflare/`、`wrangler.toml` 或 `package.json` 有变更时，GitHub Actions 会自动部署
+   - 查看部署状态：GitHub 仓库 → **Actions** 标签
+
+#### 方式 B：Cloudflare 一键部署（手动触发）
 
 [![Deploy Backend to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https%3A%2F%2Fgithub.com%2Fzhengui666%2FJh-adapter&projectName=jh-adapter-backend-cloudflare)
 
