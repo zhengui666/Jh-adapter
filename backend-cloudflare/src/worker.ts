@@ -1,4 +1,5 @@
 import { Hono } from "hono";
+import { cors } from "hono/cors";
 import type { D1Database } from "@cloudflare/workers-types";
 import {
   D1UserRepository,
@@ -19,6 +20,9 @@ const DEFAULT_MODEL = "maas/maas-chat-model";
 const DEFAULT_CODERIDER_HOST = "https://coderider.jihulab.com";
 
 const app = new Hono<{ Bindings: Env }>();
+
+// 全局 CORS，允许前端站点跨域访问 Worker API
+app.use("/*", cors({ origin: "*", allowMethods: ["GET", "POST", "OPTIONS"], allowHeaders: ["Content-Type", "X-API-Key", "X-Session-Token"] }));
 
 // 简单密码工具（Cloudflare 使用 Web Crypto）
 async function hashPassword(password: string): Promise<string> {
