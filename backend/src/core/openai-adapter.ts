@@ -39,11 +39,17 @@ export function adaptJihuToOpenAI(raw: any, requestedModel?: string): any {
         }
       } else if (Array.isArray(content)) {
         // 已经是 content-part 数组，确保每个元素都有 type 和 text
-        content = content
-          .filter((part) => part != null) // 过滤掉 null/undefined
+        // 严格过滤：先移除所有 null/undefined/无效元素
+        const validParts = content.filter((part) => part != null && part !== undefined);
+        
+        content = validParts
           .map((part: any) => {
             // 如果已经是正确的格式
             if (part && typeof part === "object" && part.type && (part.text !== undefined || part.image_url !== undefined)) {
+              // 确保对象是完整的，没有缺失字段
+              if (part.type === "text" && part.text === undefined) {
+                return { type: "text", text: "" };
+              }
               return part;
             }
             // 如果是字符串
@@ -54,11 +60,11 @@ export function adaptJihuToOpenAI(raw: any, requestedModel?: string): any {
             const textValue = String(part ?? "").trim();
             return textValue === "" ? null : { type: "text", text: textValue };
           })
-          .filter((part) => part != null); // 再次过滤掉空字符串转换后的 null
+          .filter((part) => part != null && part !== undefined); // 严格过滤掉 null/undefined
         
         // 如果是纯文本模型但收到了数组，转换为字符串（取第一个文本部分）
         if (!isMultimodal && content.length > 0) {
-          const firstTextPart = content.find((p: any) => p.type === "text");
+          const firstTextPart = content.find((p: any) => p && p.type === "text");
           content = firstTextPart?.text || "";
         }
       } else if (content == null || content === undefined) {
@@ -80,17 +86,33 @@ export function adaptJihuToOpenAI(raw: any, requestedModel?: string): any {
           content = [];
         }
         
-        // 最终验证：确保数组中每个元素都有 type 属性
-        content = content.filter((part: any) => {
-          if (!part || typeof part !== "object") {
-            return false;
-          }
-          if (!part.type) {
-            console.warn("[adaptJihuToOpenAI] Content part missing 'type', fixing:", part);
-            part.type = "text";
-          }
-          return true;
-        });
+        // 最终验证：确保数组中每个元素都有 type 属性，并移除所有无效元素
+        content = content
+          .filter((part: any) => {
+            // 严格过滤：只保留有效的对象
+            if (!part || typeof part !== "object") {
+              return false;
+            }
+            // 确保有 type 属性
+            if (!part.type) {
+              console.warn("[adaptJihuToOpenAI] Content part missing 'type', fixing:", part);
+              part.type = "text";
+            }
+            return true;
+          })
+          .map((part: any) => {
+            // 确保每个元素都是有效的对象，且包含必需的字段
+            if (part.type === "text" && part.text === undefined) {
+              part.text = "";
+            }
+            return part;
+          });
+        
+        // 如果数组为空，添加一个空文本元素（避免 Cline 等客户端访问 content[0] 时出错）
+        // 注意：这不符合严格的 OpenAI 规范（空数组应该是允许的），但为了兼容性
+        if (content.length === 0) {
+          content = [{ type: "text", text: "" }];
+        }
       }
       // 纯文本模型：确保 content 是字符串
       else {
