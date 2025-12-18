@@ -304,7 +304,7 @@ export class D1RequestLogRepository implements RequestLogRepository {
     const result = await this.db
       .prepare(
         `INSERT INTO api_request_logs(api_key_id, method, path, request_body, response_body, status_code, created_at)
-         VALUES(?, ?, ?, ?, ?, ?, ?) RETURNING id`
+         VALUES(?, ?, ?, ?, ?, ?, ?)`
       )
       .bind(
         log.apiKeyId,
@@ -315,8 +315,9 @@ export class D1RequestLogRepository implements RequestLogRepository {
         log.statusCode,
         now
       )
-      .first<any>();
-    return Number(result.id);
+      .run();
+    // D1 使用 meta.lastRowId 获取插入的 ID
+    return Number(result.meta.last_row_id || 0);
   }
 
   async cleanupOlderThan(hours: number): Promise<number> {

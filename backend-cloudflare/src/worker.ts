@@ -295,8 +295,16 @@ async function withRequestLogging(c: any, next: () => Promise<Response>) {
   const method = c.req.method;
   const path = c.req.path;
   
+  // 检查数据库绑定
+  if (!db) {
+    console.error("[RequestLog] D1 database not bound, skipping logging");
+    return next();
+  }
+  
   // 异步触发清理（不等待完成）
-  cleanupOldLogs(db).catch(() => {});
+  cleanupOldLogs(db).catch((err) => {
+    console.error("[RequestLog] Cleanup error:", err?.message || String(err));
+  });
 
   let requestBody: string | null = null;
   let responseBody: string | null = null;
@@ -310,8 +318,8 @@ async function withRequestLogging(c: any, next: () => Promise<Response>) {
         if (body) {
           requestBody = truncateString(JSON.stringify(body));
         }
-      } catch {
-        // 忽略请求体读取错误
+      } catch (err: any) {
+        console.warn("[RequestLog] Failed to read request body:", err?.message);
       }
     }
 
@@ -335,48 +343,58 @@ async function withRequestLogging(c: any, next: () => Promise<Response>) {
           responseBody = truncateString(text, 5000);
         }
       }
-    } catch {
-      // 忽略响应体读取错误
+    } catch (err: any) {
+      console.warn("[RequestLog] Failed to read response body:", err?.message);
     }
 
     // 异步记录日志（不阻塞响应）
-    if (db) {
-      const logRepo = new D1RequestLogRepository(db);
-      logRepo
-        .create({
-          id: null,
-          apiKeyId,
+    const logRepo = new D1RequestLogRepository(db);
+    logRepo
+      .create({
+        id: null,
+        apiKeyId,
+        method,
+        path,
+        requestBody,
+        responseBody,
+        statusCode,
+        createdAt: new Date(),
+      })
+      .then((logId) => {
+        console.log(`[RequestLog] Logged request: ${method} ${path} -> ${statusCode} (log_id: ${logId})`);
+      })
+      .catch((err: any) => {
+        console.error("[RequestLog] Failed to log request:", {
           method,
           path,
-          requestBody,
-          responseBody,
           statusCode,
-          createdAt: new Date(),
-        })
-        .catch((err: any) => {
-          console.error("[RequestLog] Failed to log request:", err?.message || String(err));
+          error: err?.message || String(err),
+          stack: err?.stack,
         });
-    }
+      });
 
     return response;
   } catch (err: any) {
     statusCode = err.status || 500;
     // 记录错误响应
-    if (db) {
-      const logRepo = new D1RequestLogRepository(db);
-      logRepo
-        .create({
-          id: null,
-          apiKeyId,
-          method,
-          path,
-          requestBody,
-          responseBody: truncateString(JSON.stringify({ error: err.message || String(err) })),
-          statusCode,
-          createdAt: new Date(),
-        })
-        .catch(() => {});
-    }
+    const logRepo = new D1RequestLogRepository(db);
+    logRepo
+      .create({
+        id: null,
+        apiKeyId,
+        method,
+        path,
+        requestBody,
+        responseBody: truncateString(JSON.stringify({ error: err.message || String(err) })),
+        statusCode,
+        createdAt: new Date(),
+      })
+      .then((logId) => {
+        console.log(`[RequestLog] Logged error request: ${method} ${path} -> ${statusCode} (log_id: ${logId})`);
+      })
+      .catch((logErr: any) => {
+        console.error("[RequestLog] Failed to log error request:", logErr?.message || String(logErr));
+      });
     throw err;
   }
 }
@@ -500,6 +518,55 @@ app.post("/admin/registrations/:id/reject", withApiKey, withSession, async (c: a
   const registrationService = new RegistrationService(regRepo);
   await registrationService.reject(id);
   return c.json({ status: "ok" });
+});
+
+// 管理员：查询请求日志
+app.get("/admin/request-logs", withApiKey, withSession, async (c: any) => {
+  const env = c.env as Env;
+  const db = env.DB as D1Database;
+  const apiKeyRecord = c.get("apiKeyRecord");
+
+  if (!apiKeyRecord || !apiKeyRecord.is_admin) {
+    return c.json({ detail: "admin only" }, 403);
+  }
+
+  const limit = Number(c.req.query("limit") || 50);
+  const offset = Number(c.req.query("offset") || 0);
+  const apiKeyId = c.req.query("api_key_id") ? Number(c.req.query("api_key_id")) : null;
+
+  try {
+    let query = "SELECT * FROM api_request_logs";
+    const params: any[] = [];
+
+    if (apiKeyId) {
+      query += " WHERE api_key_id = ?";
+      params.push(apiKeyId);
+    }
+
+    query += " ORDER BY created_at DESC LIMIT ? OFFSET ?";
+    params.push(limit, offset);
+
+    const stmt = db.prepare(query);
+    const result = await stmt.bind(...params).all<any>();
+
+    // 获取总数
+    let countQuery = "SELECT COUNT(*) as total FROM api_request_logs";
+    if (apiKeyId) {
+      countQuery += " WHERE api_key_id = ?";
+    }
+    const countStmt = db.prepare(countQuery);
+    const countResult = await (apiKeyId ? countStmt.bind(apiKeyId) : countStmt).first<any>();
+
+    return c.json({
+      logs: result.results || [],
+      total: countResult?.total || 0,
+      limit,
+      offset,
+    });
+  } catch (err: any) {
+    console.error("[Admin] Failed to query request logs:", err);
+    return c.json({ detail: err.message || "Failed to query logs" }, 500);
+  }
 });
 
 // 启动 OAuth 流程 (Cloudflare)
