@@ -25,13 +25,21 @@ export function adaptJihuToOpenAI(raw: any, requestedModel?: string): any {
   const choices = rawChoices
     .filter((ch) => ch != null) // 过滤掉 null/undefined
     .map((ch, index) => {
+      // 确保 message 对象存在
+      if (!ch || typeof ch !== "object") {
+        return null;
+      }
       const msg = ch?.message || {};
+      if (!msg || typeof msg !== "object") {
+        return null;
+      }
       let content = msg.content;
 
       // 处理 content 格式
       if (typeof content === "string") {
         if (isMultimodal) {
           // 多模态模型：转换为数组格式
+          // 即使是空字符串，也转换为数组（后面会确保至少有一个元素）
           content = content.trim() === "" ? [] : [{ type: "text", text: content }];
         } else {
           // 纯文本模型：保持字符串格式（符合 OpenAI 规范）
@@ -131,6 +139,18 @@ export function adaptJihuToOpenAI(raw: any, requestedModel?: string): any {
       };
     })
     .filter((choice) => choice != null); // 最终过滤掉无效的 choice
+
+  // 确保 choices 数组至少有一个元素（避免客户端访问 choices[0] 时出错）
+  if (choices.length === 0) {
+    choices.push({
+      index: 0,
+      finish_reason: "stop",
+      message: {
+        role: "assistant",
+        content: isMultimodal ? [{ type: "text", text: "" }] : "",
+      },
+    });
+  }
 
   const usageRaw = raw.usage || {};
   const promptTokens = usageRaw.prompt_tokens ?? 0;
