@@ -120,6 +120,46 @@ app.get("/health", (c) => {
   return c.json({ status: "ok", backend: "cloudflare-worker" });
 });
 
+// 测试日志记录功能
+app.get("/test/logging", withRequestLogging, async (c: any) => {
+  const env = c.env as Env;
+  const db = env.DB as D1Database;
+  
+  if (!db) {
+    return c.json({ error: "D1 database not bound" }, 500);
+  }
+  
+  // 检查表是否存在
+  try {
+    const result = await db.prepare(
+      "SELECT name FROM sqlite_master WHERE type='table' AND name='api_request_logs'"
+    ).first();
+    
+    const tableExists = result !== null;
+    
+    // 获取日志数量
+    let logCount = 0;
+    if (tableExists) {
+      const countResult = await db.prepare("SELECT COUNT(*) as count FROM api_request_logs").first();
+      logCount = countResult?.count || 0;
+    }
+    
+    return c.json({
+      status: "ok",
+      table_exists: tableExists,
+      log_count: logCount,
+      message: tableExists 
+        ? `Table exists. Total logs: ${logCount}` 
+        : "Table 'api_request_logs' does not exist. Please run schema.sql in D1 console.",
+    });
+  } catch (err: any) {
+    return c.json({
+      error: "Failed to check table",
+      message: err?.message || String(err),
+    }, 500);
+  }
+});
+
 // 注册
 app.post("/auth/register", async (c) => {
   const env = c.env as Env;
@@ -291,9 +331,9 @@ async function cleanupOldLogs(db: D1Database) {
 async function withRequestLogging(c: any, next: () => Promise<Response>) {
   const env = c.env as Env;
   const db = env.DB as D1Database;
-  const apiKeyId = c.get("apiKeyId") || null;
   const method = c.req.method;
   const path = c.req.path;
+  const startTime = Date.now();
   
   // 检查数据库绑定
   if (!db) {
@@ -309,23 +349,27 @@ async function withRequestLogging(c: any, next: () => Promise<Response>) {
   let requestBody: string | null = null;
   let responseBody: string | null = null;
   let statusCode = 500;
+  let apiKeyId: number | null = null;
+
+  // 尝试读取请求体（对于 POST/PUT/PATCH 请求）
+  if (["POST", "PUT", "PATCH"].includes(method)) {
+    try {
+      const body = await c.req.clone().json().catch(() => null);
+      if (body) {
+        requestBody = truncateString(JSON.stringify(body));
+      }
+    } catch (err: any) {
+      console.warn("[RequestLog] Failed to read request body:", err?.message);
+    }
+  }
 
   try {
-    // 尝试读取请求体（对于 POST/PUT/PATCH 请求）
-    if (["POST", "PUT", "PATCH"].includes(method)) {
-      try {
-        const body = await c.req.clone().json().catch(() => null);
-        if (body) {
-          requestBody = truncateString(JSON.stringify(body));
-        }
-      } catch (err: any) {
-        console.warn("[RequestLog] Failed to read request body:", err?.message);
-      }
-    }
-
     // 执行下一个中间件/处理器
     const response = await next();
     statusCode = response.status;
+    
+    // 尝试获取 apiKeyId（可能在后续中间件中设置）
+    apiKeyId = c.get("apiKeyId") || null;
 
     // 尝试读取响应体
     try {
@@ -349,6 +393,55 @@ async function withRequestLogging(c: any, next: () => Promise<Response>) {
 
     // 异步记录日志（不阻塞响应）
     const logRepo = new D1RequestLogRepository(db);
+    const logData = {
+      id: null,
+      apiKeyId,
+      method,
+      path,
+      requestBody,
+      responseBody,
+      statusCode,
+      createdAt: new Date(),
+    };
+    
+    logRepo
+      .create(logData)
+      .then((logId) => {
+        const duration = Date.now() - startTime;
+        console.log(`[RequestLog] ✅ Logged: ${method} ${path} -> ${statusCode} (${duration}ms, log_id: ${logId})`);
+      })
+      .catch((err: any) => {
+        console.error("[RequestLog] ❌ Failed to log request:", {
+          method,
+          path,
+          statusCode,
+          error: err?.message || String(err),
+          errorCode: err?.code,
+          errorCause: err?.cause,
+          stack: err?.stack,
+        });
+        // 尝试检查是否是表不存在的问题
+        if (err?.message?.includes("no such table") || err?.message?.includes("api_request_logs")) {
+          console.error("[RequestLog] ⚠️  Table 'api_request_logs' may not exist. Please run schema.sql in D1 console.");
+        }
+      });
+
+    return response;
+  } catch (err: any) {
+    statusCode = err.status || 500;
+    apiKeyId = c.get("apiKeyId") || null;
+    
+    // 尝试读取错误响应体
+    try {
+      if (err.response) {
+        responseBody = truncateString(JSON.stringify({ error: err.message || String(err) }));
+      }
+    } catch {
+      responseBody = truncateString(JSON.stringify({ error: err.message || String(err) }));
+    }
+    
+    // 记录错误响应
+    const logRepo = new D1RequestLogRepository(db);
     logRepo
       .create({
         id: null,
@@ -361,39 +454,17 @@ async function withRequestLogging(c: any, next: () => Promise<Response>) {
         createdAt: new Date(),
       })
       .then((logId) => {
-        console.log(`[RequestLog] Logged request: ${method} ${path} -> ${statusCode} (log_id: ${logId})`);
+        const duration = Date.now() - startTime;
+        console.log(`[RequestLog] ✅ Logged error: ${method} ${path} -> ${statusCode} (${duration}ms, log_id: ${logId})`);
       })
-      .catch((err: any) => {
-        console.error("[RequestLog] Failed to log request:", {
+      .catch((logErr: any) => {
+        console.error("[RequestLog] ❌ Failed to log error request:", {
           method,
           path,
           statusCode,
-          error: err?.message || String(err),
-          stack: err?.stack,
+          error: logErr?.message || String(logErr),
+          errorCode: logErr?.code,
         });
-      });
-
-    return response;
-  } catch (err: any) {
-    statusCode = err.status || 500;
-    // 记录错误响应
-    const logRepo = new D1RequestLogRepository(db);
-    logRepo
-      .create({
-        id: null,
-        apiKeyId,
-        method,
-        path,
-        requestBody,
-        responseBody: truncateString(JSON.stringify({ error: err.message || String(err) })),
-        statusCode,
-        createdAt: new Date(),
-      })
-      .then((logId) => {
-        console.log(`[RequestLog] Logged error request: ${method} ${path} -> ${statusCode} (log_id: ${logId})`);
-      })
-      .catch((logErr: any) => {
-        console.error("[RequestLog] Failed to log error request:", logErr?.message || String(logErr));
       });
     throw err;
   }
@@ -864,7 +935,8 @@ async function callJihuChat(
 }
 
 // Chat Completions（OpenAI 兼容：返回 content-part 数组，兼容 Cline 等客户端）
-app.post("/v1/chat/completions", withApiKey, withRequestLogging, async (c: any) => {
+// 注意：withRequestLogging 在 withApiKey 之前，确保所有请求（包括认证失败的）都被记录
+app.post("/v1/chat/completions", withRequestLogging, withApiKey, async (c: any) => {
   const env = c.env as Env;
   const apiKeyId = c.get("apiKeyId");
   const db = env.DB as D1Database;
@@ -896,7 +968,8 @@ app.post("/v1/chat/completions", withApiKey, withRequestLogging, async (c: any) 
 });
 
 // POST /v1/messages (Claude API兼容)
-app.post("/v1/messages", withApiKey, withRequestLogging, async (c: any) => {
+// 注意：withRequestLogging 在 withApiKey 之前，确保所有请求（包括认证失败的）都被记录
+app.post("/v1/messages", withRequestLogging, withApiKey, async (c: any) => {
   const env = c.env as Env;
   const apiKeyId = c.get("apiKeyId");
   const db = env.DB as D1Database;
