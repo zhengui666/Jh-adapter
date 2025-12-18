@@ -337,14 +337,32 @@ async function withRequestLogging(c: any, next: () => Promise<Response>) {
   
   // 检查数据库绑定
   if (!db) {
-    console.error("[RequestLog] D1 database not bound, skipping logging");
+    console.error("[RequestLog] ❌ D1 database not bound, skipping logging");
     return next();
   }
   
+  // 先检查表是否存在（同步检查，避免后续失败）
+  let tableExists = false;
+  try {
+    const tableCheck = await db.prepare(
+      "SELECT name FROM sqlite_master WHERE type='table' AND name='api_request_logs'"
+    ).first();
+    tableExists = tableCheck !== null;
+    if (!tableExists) {
+      console.error("[RequestLog] ❌ Table 'api_request_logs' does not exist!");
+      console.error("[RequestLog] 💡 Please run the following SQL in D1 Console:");
+      console.error("[RequestLog]    CREATE TABLE IF NOT EXISTS api_request_logs (...);");
+    }
+  } catch (err: any) {
+    console.error("[RequestLog] ❌ Failed to check table existence:", err?.message || String(err));
+  }
+  
   // 异步触发清理（不等待完成）
-  cleanupOldLogs(db).catch((err) => {
-    console.error("[RequestLog] Cleanup error:", err?.message || String(err));
-  });
+  if (tableExists) {
+    cleanupOldLogs(db).catch((err) => {
+      console.error("[RequestLog] Cleanup error:", err?.message || String(err));
+    });
+  }
 
   let requestBody: string | null = null;
   let responseBody: string | null = null;
@@ -391,26 +409,26 @@ async function withRequestLogging(c: any, next: () => Promise<Response>) {
       console.warn("[RequestLog] Failed to read response body:", err?.message);
     }
 
-    // 异步记录日志（不阻塞响应）
-    const logRepo = new D1RequestLogRepository(db);
-    const logData = {
-      id: null,
-      apiKeyId,
-      method,
-      path,
-      requestBody,
-      responseBody,
-      statusCode,
-      createdAt: new Date(),
-    };
-    
-    logRepo
-      .create(logData)
-      .then((logId) => {
+    // 记录日志 - 直接 await 确保写入完成（D1 写入很快，不会明显阻塞）
+    if (tableExists) {
+      const logRepo = new D1RequestLogRepository(db);
+      const logData = {
+        id: null,
+        apiKeyId,
+        method,
+        path,
+        requestBody,
+        responseBody,
+        statusCode,
+        createdAt: new Date(),
+      };
+      
+      try {
+        const logId = await logRepo.create(logData);
         const duration = Date.now() - startTime;
         console.log(`[RequestLog] ✅ Logged: ${method} ${path} -> ${statusCode} (${duration}ms, log_id: ${logId})`);
-      })
-      .catch((err: any) => {
+      } catch (err: any) {
+        // 详细错误日志
         console.error("[RequestLog] ❌ Failed to log request:", {
           method,
           path,
@@ -418,13 +436,19 @@ async function withRequestLogging(c: any, next: () => Promise<Response>) {
           error: err?.message || String(err),
           errorCode: err?.code,
           errorCause: err?.cause,
-          stack: err?.stack,
+          errorString: String(err),
+          errorStack: err?.stack,
         });
-        // 尝试检查是否是表不存在的问题
-        if (err?.message?.includes("no such table") || err?.message?.includes("api_request_logs")) {
-          console.error("[RequestLog] ⚠️  Table 'api_request_logs' may not exist. Please run schema.sql in D1 console.");
+        // 检查是否是表不存在的问题
+        const errorMsg = String(err?.message || err || '').toLowerCase();
+        if (errorMsg.includes("no such table") || errorMsg.includes("api_request_logs")) {
+          console.error("[RequestLog] ⚠️  Table 'api_request_logs' does not exist!");
+          console.error("[RequestLog] 💡 Please run schema.sql in D1 Console to create the table.");
         }
-      });
+      }
+    } else {
+      console.warn(`[RequestLog] ⚠️  Skipping log write: table does not exist (${method} ${path})`);
+    }
 
     return response;
   } catch (err: any) {
@@ -440,32 +464,33 @@ async function withRequestLogging(c: any, next: () => Promise<Response>) {
       responseBody = truncateString(JSON.stringify({ error: err.message || String(err) }));
     }
     
-    // 记录错误响应
-    const logRepo = new D1RequestLogRepository(db);
-    logRepo
-      .create({
-        id: null,
-        apiKeyId,
-        method,
-        path,
-        requestBody,
-        responseBody,
-        statusCode,
-        createdAt: new Date(),
-      })
-      .then((logId) => {
+    // 记录错误响应 - 直接 await 确保写入完成
+    if (tableExists) {
+      const logRepo = new D1RequestLogRepository(db);
+      try {
+        const logId = await logRepo.create({
+          id: null,
+          apiKeyId,
+          method,
+          path,
+          requestBody,
+          responseBody,
+          statusCode,
+          createdAt: new Date(),
+        });
         const duration = Date.now() - startTime;
         console.log(`[RequestLog] ✅ Logged error: ${method} ${path} -> ${statusCode} (${duration}ms, log_id: ${logId})`);
-      })
-      .catch((logErr: any) => {
+      } catch (logErr: any) {
         console.error("[RequestLog] ❌ Failed to log error request:", {
           method,
           path,
           statusCode,
           error: logErr?.message || String(logErr),
           errorCode: logErr?.code,
+          errorString: String(logErr),
         });
-      });
+      }
+    }
     throw err;
   }
 }
