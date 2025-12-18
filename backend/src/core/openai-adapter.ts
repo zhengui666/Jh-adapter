@@ -2,10 +2,12 @@
  * 将 Jihu / MiniMax 风格的 chatCompletions 响应
  * 适配为 OpenAI Chat Completions 兼容结构。
  *
- * 目前主要解决:
- * - choices[*].message.content 为字符串时，转换为 content-part 数组，
- *   以兼容 Cline 等期望 content[].type / content[].text 的客户端。
+ * 根据模型类型动态返回格式：
+ * - 纯文本模型（如 DeepSeek V3.1）：返回字符串格式的 content（符合 OpenAI 规范）
+ * - 多模态模型（如 MiniMax M2）：返回数组格式的 content [{type: "text", text: "..."}]
  */
+
+import { isMultimodalModel } from '../shared/model-utils.js';
 
 export function adaptJihuToOpenAI(raw: any, requestedModel?: string): any {
   if (!raw || typeof raw !== "object") {
@@ -16,6 +18,7 @@ export function adaptJihuToOpenAI(raw: any, requestedModel?: string): any {
     typeof raw.created === "number" ? raw.created : Math.floor(Date.now() / 1000);
 
   const model = requestedModel || raw.model || "maas/maas-chat-model";
+  const isMultimodal = isMultimodalModel(model);
 
   const rawChoices: any[] = Array.isArray(raw.choices) ? raw.choices : [];
 
@@ -25,9 +28,15 @@ export function adaptJihuToOpenAI(raw: any, requestedModel?: string): any {
       const msg = ch?.message || {};
       let content = msg.content;
 
-      // 将字符串内容封装为 [{ type: 'text', text: '...' }]
+      // 处理 content 格式
       if (typeof content === "string") {
-        content = content.trim() === "" ? [] : [{ type: "text", text: content }];
+        if (isMultimodal) {
+          // 多模态模型：转换为数组格式
+          content = content.trim() === "" ? [] : [{ type: "text", text: content }];
+        } else {
+          // 纯文本模型：保持字符串格式（符合 OpenAI 规范）
+          content = content.trim() === "" ? "" : content;
+        }
       } else if (Array.isArray(content)) {
         // 已经是 content-part 数组，确保每个元素都有 type 和 text
         content = content
@@ -46,37 +55,56 @@ export function adaptJihuToOpenAI(raw: any, requestedModel?: string): any {
             return textValue === "" ? null : { type: "text", text: textValue };
           })
           .filter((part) => part != null); // 再次过滤掉空字符串转换后的 null
+        
+        // 如果是纯文本模型但收到了数组，转换为字符串（取第一个文本部分）
+        if (!isMultimodal && content.length > 0) {
+          const firstTextPart = content.find((p: any) => p.type === "text");
+          content = firstTextPart?.text || "";
+        }
       } else if (content == null || content === undefined) {
-        content = [];
+        // null/undefined 处理
+        content = isMultimodal ? [] : "";
       } else {
-        // 其它类型兜底为字符串
+        // 其它类型兜底
         const textValue = String(content).trim();
-        content = textValue === "" ? [] : [{ type: "text", text: textValue }];
+        if (isMultimodal) {
+          content = textValue === "" ? [] : [{ type: "text", text: textValue }];
+        } else {
+          content = textValue;
+        }
       }
 
-      // 确保 content 始终是数组，且每个元素都有 type
-      if (!Array.isArray(content)) {
-        content = [];
+      // 多模态模型：确保 content 是数组，且每个元素都有 type
+      if (isMultimodal) {
+        if (!Array.isArray(content)) {
+          content = [];
+        }
+        
+        // 最终验证：确保数组中每个元素都有 type 属性
+        content = content.filter((part: any) => {
+          if (!part || typeof part !== "object") {
+            return false;
+          }
+          if (!part.type) {
+            console.warn("[adaptJihuToOpenAI] Content part missing 'type', fixing:", part);
+            part.type = "text";
+          }
+          return true;
+        });
       }
-      
-      // 最终验证：确保数组中每个元素都有 type 属性
-      content = content.filter((part: any) => {
-        if (!part || typeof part !== "object") {
-          return false;
+      // 纯文本模型：确保 content 是字符串
+      else {
+        if (typeof content !== "string") {
+          content = String(content || "");
         }
-        if (!part.type) {
-          console.warn("[adaptJihuToOpenAI] Content part missing 'type', fixing:", part);
-          part.type = "text";
-        }
-        return true;
-      });
+      }
 
       return {
         index: ch?.index ?? index,
         finish_reason: ch?.finish_reason ?? "stop",
         message: {
           role: msg.role || "assistant",
-          content, // 确保 content 是有效的数组
+          content, // 多模态模型是数组，纯文本模型是字符串
         },
       };
     })
