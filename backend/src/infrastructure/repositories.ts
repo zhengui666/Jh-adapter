@@ -40,19 +40,3 @@ export interface SettingRepository {
   set(key: string, value: string): void;
 }
 
-export interface RequestLog {
-  id?: number | null;
-  apiKeyId: number | null;
-  method: string;
-  path: string;
-  requestBody: string | null;
-  responseBody: string | null;
-  statusCode: number;
-  createdAt: Date;
-}
-
-export interface RequestLogRepository {
-  create(log: RequestLog): Promise<number>;
-  cleanupOlderThan(hours: number): Promise<number>; // 返回删除的记录数
-}
-

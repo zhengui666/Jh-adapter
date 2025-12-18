@@ -7,7 +7,6 @@ import {
   D1SessionRepository,
   D1RegistrationRequestRepository,
   D1SettingRepository,
-  D1RequestLogRepository,
   type D1Env,
 } from "./d1-repositories";
 import { AuthenticationError, JihuAuthExpiredError } from "../../backend/src/domain/exceptions";
@@ -120,45 +119,6 @@ app.get("/health", (c) => {
   return c.json({ status: "ok", backend: "cloudflare-worker" });
 });
 
-// 测试日志记录功能
-app.get("/test/logging", withRequestLogging, async (c: any) => {
-  const env = c.env as Env;
-  const db = env.DB as D1Database;
-  
-  if (!db) {
-    return c.json({ error: "D1 database not bound" }, 500);
-  }
-  
-  // 检查表是否存在
-  try {
-    const result = await db.prepare(
-      "SELECT name FROM sqlite_master WHERE type='table' AND name='api_request_logs'"
-    ).first();
-    
-    const tableExists = result !== null;
-    
-    // 获取日志数量
-    let logCount = 0;
-    if (tableExists) {
-      const countResult = await db.prepare("SELECT COUNT(*) as count FROM api_request_logs").first();
-      logCount = countResult?.count || 0;
-    }
-    
-    return c.json({
-      status: "ok",
-      table_exists: tableExists,
-      log_count: logCount,
-      message: tableExists 
-        ? `Table exists. Total logs: ${logCount}` 
-        : "Table 'api_request_logs' does not exist. Please run schema.sql in D1 console.",
-    });
-  } catch (err: any) {
-    return c.json({
-      error: "Failed to check table",
-      message: err?.message || String(err),
-    }, 500);
-  }
-});
 
 // 注册
 app.post("/auth/register", async (c) => {
@@ -307,193 +267,6 @@ async function withApiKey(c: any, next: () => Promise<Response>) {
   }
 }
 
-// 工具函数：限制字符串长度，避免存储过大的请求/响应体
-function truncateString(str: string | null | undefined, maxLength: number = 10000): string | null {
-  if (!str) return null;
-  if (str.length <= maxLength) return str;
-  return str.substring(0, maxLength) + `... [truncated, original length: ${str.length}]`;
-}
-
-// 自动清理超过24小时的日志（异步执行，不阻塞请求）
-async function cleanupOldLogs(db: D1Database) {
-  try {
-    const logRepo = new D1RequestLogRepository(db);
-    const deletedCount = await logRepo.cleanupOlderThan(24);
-    if (deletedCount > 0) {
-      console.log(`[RequestLog] Cleaned up ${deletedCount} old log entries (older than 24h)`);
-    }
-  } catch (err: any) {
-    console.error("[RequestLog] Cleanup error:", err?.message || String(err));
-  }
-}
-
-// 中间件：请求日志记录
-async function withRequestLogging(c: any, next: () => Promise<Response>) {
-  const env = c.env as Env;
-  const db = env.DB as D1Database;
-  const method = c.req.method;
-  const path = c.req.path;
-  const startTime = Date.now();
-  
-  // 检查数据库绑定
-  if (!db) {
-    console.error("[RequestLog] ❌ D1 database not bound, skipping logging");
-    return next();
-  }
-  
-  // 先检查表是否存在（同步检查，避免后续失败）
-  let tableExists = false;
-  try {
-    const tableCheck = await db.prepare(
-      "SELECT name FROM sqlite_master WHERE type='table' AND name='api_request_logs'"
-    ).first();
-    tableExists = tableCheck !== null;
-    if (!tableExists) {
-      console.error("[RequestLog] ❌ Table 'api_request_logs' does not exist!");
-      console.error("[RequestLog] 💡 Please run the following SQL in D1 Console:");
-      console.error("[RequestLog]    CREATE TABLE IF NOT EXISTS api_request_logs (...);");
-    }
-  } catch (err: any) {
-    console.error("[RequestLog] ❌ Failed to check table existence:", err?.message || String(err));
-  }
-  
-  // 异步触发清理（不等待完成）
-  if (tableExists) {
-    cleanupOldLogs(db).catch((err) => {
-      console.error("[RequestLog] Cleanup error:", err?.message || String(err));
-    });
-  }
-
-  let requestBody: string | null = null;
-  let responseBody: string | null = null;
-  let statusCode = 500;
-  let apiKeyId: number | null = null;
-
-  // 尝试读取请求体（对于 POST/PUT/PATCH 请求）
-  if (["POST", "PUT", "PATCH"].includes(method)) {
-    try {
-      const body = await c.req.clone().json().catch(() => null);
-      if (body) {
-        requestBody = truncateString(JSON.stringify(body));
-      }
-    } catch (err: any) {
-      console.warn("[RequestLog] Failed to read request body:", err?.message);
-    }
-  }
-
-  try {
-    // 执行下一个中间件/处理器
-    const response = await next();
-    statusCode = response.status;
-    
-    // 尝试获取 apiKeyId（可能在后续中间件中设置）
-    apiKeyId = c.get("apiKeyId") || null;
-
-    // 尝试读取响应体
-    try {
-      const clonedResponse = response.clone();
-      const contentType = clonedResponse.headers.get("content-type") || "";
-      if (contentType.includes("application/json")) {
-        const body = await clonedResponse.json().catch(() => null);
-        if (body) {
-          responseBody = truncateString(JSON.stringify(body));
-        }
-      } else {
-        // 对于非 JSON 响应，尝试读取文本（限制长度）
-        const text = await clonedResponse.text().catch(() => null);
-        if (text) {
-          responseBody = truncateString(text, 5000);
-        }
-      }
-    } catch (err: any) {
-      console.warn("[RequestLog] Failed to read response body:", err?.message);
-    }
-
-    // 记录日志 - 直接 await 确保写入完成（D1 写入很快，不会明显阻塞）
-    if (tableExists) {
-      const logRepo = new D1RequestLogRepository(db);
-      const logData = {
-        id: null,
-        apiKeyId,
-        method,
-        path,
-        requestBody,
-        responseBody,
-        statusCode,
-        createdAt: new Date(),
-      };
-      
-      try {
-        const logId = await logRepo.create(logData);
-        const duration = Date.now() - startTime;
-        console.log(`[RequestLog] ✅ Logged: ${method} ${path} -> ${statusCode} (${duration}ms, log_id: ${logId})`);
-      } catch (err: any) {
-        // 详细错误日志
-        console.error("[RequestLog] ❌ Failed to log request:", {
-          method,
-          path,
-          statusCode,
-          error: err?.message || String(err),
-          errorCode: err?.code,
-          errorCause: err?.cause,
-          errorString: String(err),
-          errorStack: err?.stack,
-        });
-        // 检查是否是表不存在的问题
-        const errorMsg = String(err?.message || err || '').toLowerCase();
-        if (errorMsg.includes("no such table") || errorMsg.includes("api_request_logs")) {
-          console.error("[RequestLog] ⚠️  Table 'api_request_logs' does not exist!");
-          console.error("[RequestLog] 💡 Please run schema.sql in D1 Console to create the table.");
-        }
-      }
-    } else {
-      console.warn(`[RequestLog] ⚠️  Skipping log write: table does not exist (${method} ${path})`);
-    }
-
-    return response;
-  } catch (err: any) {
-    statusCode = err.status || 500;
-    apiKeyId = c.get("apiKeyId") || null;
-    
-    // 尝试读取错误响应体
-    try {
-      if (err.response) {
-        responseBody = truncateString(JSON.stringify({ error: err.message || String(err) }));
-      }
-    } catch {
-      responseBody = truncateString(JSON.stringify({ error: err.message || String(err) }));
-    }
-    
-    // 记录错误响应 - 直接 await 确保写入完成
-    if (tableExists) {
-      const logRepo = new D1RequestLogRepository(db);
-      try {
-        const logId = await logRepo.create({
-          id: null,
-          apiKeyId,
-          method,
-          path,
-          requestBody,
-          responseBody,
-          statusCode,
-          createdAt: new Date(),
-        });
-        const duration = Date.now() - startTime;
-        console.log(`[RequestLog] ✅ Logged error: ${method} ${path} -> ${statusCode} (${duration}ms, log_id: ${logId})`);
-      } catch (logErr: any) {
-        console.error("[RequestLog] ❌ Failed to log error request:", {
-          method,
-          path,
-          statusCode,
-          error: logErr?.message || String(logErr),
-          errorCode: logErr?.code,
-          errorString: String(logErr),
-        });
-      }
-    }
-    throw err;
-  }
-}
 
 // 中间件：Session 校验
 async function withSession(c: any, next: () => Promise<Response>) {
@@ -616,54 +389,6 @@ app.post("/admin/registrations/:id/reject", withApiKey, withSession, async (c: a
   return c.json({ status: "ok" });
 });
 
-// 管理员：查询请求日志
-app.get("/admin/request-logs", withApiKey, withSession, async (c: any) => {
-  const env = c.env as Env;
-  const db = env.DB as D1Database;
-  const apiKeyRecord = c.get("apiKeyRecord");
-
-  if (!apiKeyRecord || !apiKeyRecord.is_admin) {
-    return c.json({ detail: "admin only" }, 403);
-  }
-
-  const limit = Number(c.req.query("limit") || 50);
-  const offset = Number(c.req.query("offset") || 0);
-  const apiKeyId = c.req.query("api_key_id") ? Number(c.req.query("api_key_id")) : null;
-
-  try {
-    let query = "SELECT * FROM api_request_logs";
-    const params: any[] = [];
-
-    if (apiKeyId) {
-      query += " WHERE api_key_id = ?";
-      params.push(apiKeyId);
-    }
-
-    query += " ORDER BY created_at DESC LIMIT ? OFFSET ?";
-    params.push(limit, offset);
-
-    const stmt = db.prepare(query);
-    const result = await stmt.bind(...params).all<any>();
-
-    // 获取总数
-    let countQuery = "SELECT COUNT(*) as total FROM api_request_logs";
-    if (apiKeyId) {
-      countQuery += " WHERE api_key_id = ?";
-    }
-    const countStmt = db.prepare(countQuery);
-    const countResult = await (apiKeyId ? countStmt.bind(apiKeyId) : countStmt).first<any>();
-
-    return c.json({
-      logs: result.results || [],
-      total: countResult?.total || 0,
-      limit,
-      offset,
-    });
-  } catch (err: any) {
-    console.error("[Admin] Failed to query request logs:", err);
-    return c.json({ detail: err.message || "Failed to query logs" }, 500);
-  }
-});
 
 // 启动 OAuth 流程 (Cloudflare)
 app.get("/auth/oauth-start", async (c) => {
@@ -960,8 +685,7 @@ async function callJihuChat(
 }
 
 // Chat Completions（OpenAI 兼容：返回 content-part 数组，兼容 Cline 等客户端）
-// 注意：withRequestLogging 在 withApiKey 之前，确保所有请求（包括认证失败的）都被记录
-app.post("/v1/chat/completions", withRequestLogging, withApiKey, async (c: any) => {
+app.post("/v1/chat/completions", withApiKey, async (c: any) => {
   const env = c.env as Env;
   const apiKeyId = c.get("apiKeyId");
   const db = env.DB as D1Database;
@@ -993,8 +717,7 @@ app.post("/v1/chat/completions", withRequestLogging, withApiKey, async (c: any) 
 });
 
 // POST /v1/messages (Claude API兼容)
-// 注意：withRequestLogging 在 withApiKey 之前，确保所有请求（包括认证失败的）都被记录
-app.post("/v1/messages", withRequestLogging, withApiKey, async (c: any) => {
+app.post("/v1/messages", withApiKey, async (c: any) => {
   const env = c.env as Env;
   const apiKeyId = c.get("apiKeyId");
   const db = env.DB as D1Database;
