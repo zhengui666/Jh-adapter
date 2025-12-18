@@ -6,6 +6,8 @@
 import axios, { AxiosInstance } from 'axios';
 import type { OAuthService } from './oauth-service.js';
 import { JihuAuthExpiredError } from '../domain/exceptions.js';
+import logger from '../shared/logger.js';
+import { getCoderiderJwt as getCoderiderJwtShared, callJihuChat as callJihuChatShared, getModelConfig as getModelConfigShared } from '../shared/jihu-client-shared.js';
 
 export class JihuClient {
   private baseUrl: string;
@@ -60,15 +62,6 @@ export class JihuClient {
     }
   }
 
-  private stripModelPrefix(model: string): string {
-    for (const prefix of ['maas/', 'server/']) {
-      if (model.startsWith(prefix)) {
-        return model.slice(prefix.length);
-      }
-    }
-    return model;
-  }
-
   async chatCompletions(
     messages: any[],
     model?: string,
@@ -76,7 +69,8 @@ export class JihuClient {
     extraParams?: any
   ): Promise<any> {
     const jwt = await this.getJwt();
-    const normalizedModel = this.stripModelPrefix(model || this.defaultModel);
+    const { stripModelPrefix } = await import('../shared/model-utils.js');
+    const normalizedModel = stripModelPrefix(model || this.defaultModel);
 
     const payload = {
       model: normalizedModel,

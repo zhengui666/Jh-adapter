@@ -5,9 +5,12 @@
   "description": "Jihu CodeRider OpenAI Proxy - Cloudflare Workers deployment",
   "type": "module",
   "scripts": {
-    "build": "echo 'No build step required for Cloudflare Workers'",
+    "build": "echo 'No build step required for Cloudflare Workers - Wrangler handles bundling'",
+    "build:cloudflare": "echo 'Building for Cloudflare Workers...'",
     "deploy": "npm install && wrangler deploy",
-    "deploy:cloudflare": "npm install && wrangler deploy"
+    "deploy:cloudflare": "npm install && wrangler deploy",
+    "dev:cloudflare": "wrangler dev",
+    "type-check": "tsc --noEmit"
   },
   "dependencies": {
     "hono": "^4.6.0"
