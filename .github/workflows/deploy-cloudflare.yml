@@ -45,3 +45,20 @@ jobs:
           workingDirectory: .
           command: deploy
 
+      - name: Configure D1 Binding (Post-Deploy)
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          WORKER_NAME: jh-adapter-backend
+          D1_DATABASE_NAME: JH_ADAPTER_DB
+          D1_DATABASE_ID: ${{ secrets.CLOUDFLARE_D1_DATABASE_ID }}
+        run: |
+          if [ -z "$D1_DATABASE_ID" ]; then
+            echo "⚠️  Warning: CLOUDFLARE_D1_DATABASE_ID secret not set, skipping D1 binding configuration"
+            echo "   Please set CLOUDFLARE_D1_DATABASE_ID in GitHub Secrets"
+            echo "   Or configure D1 binding manually in Cloudflare Dashboard"
+            exit 0
+          fi
+          chmod +x scripts/configure-d1-binding-wrangler.sh
+          ./scripts/configure-d1-binding-wrangler.sh
+

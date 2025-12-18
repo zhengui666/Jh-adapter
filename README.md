@@ -408,18 +408,27 @@ database_id = "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
 
 复制其中的 `database_id`。
 
-#### 第 2 步：更新 `wrangler.toml` 绑定 D1
+#### 第 2 步：配置 D1 数据库绑定
 
-编辑项目根目录的 `wrangler.toml`：
+**方式 A：通过 GitHub Secrets 自动配置（推荐）**
 
-```toml
-[[d1_databases]]
-binding = "DB"
-database_name = "JH_ADAPTER_DB"
-database_id = "你的实际 database_id"
-```
+1. 在 GitHub 仓库的 **Settings → Secrets and variables → Actions** 中添加：
+   - `CLOUDFLARE_D1_DATABASE_ID`: 你的 D1 数据库 ID
 
-> **注意：** `database_name` 要与 D1 数据库名称一致。
+2. GitHub Actions 会在每次部署后自动配置 D1 绑定。
+
+**方式 B：在 Cloudflare Dashboard 中手动配置**
+
+1. 登录 [Cloudflare Dashboard](https://dash.cloudflare.com/)
+2. 进入 **Workers & Pages** → 你的 Worker (`jh-adapter-backend`)
+3. 进入 **Settings** → **Variables**
+4. 在 **D1 Database Bindings** 部分，点击 **Add binding**
+5. 配置：
+   - **Variable name**: `DB`
+   - **Database**: 选择 `JH_ADAPTER_DB`
+6. 点击 **Save**
+
+> **注意：** 我们**不在** `wrangler.toml` 中硬编码 D1 绑定，以避免每次部署时配置丢失。绑定通过部署后脚本或 Dashboard 配置。
 
 #### 第 3 步：初始化 D1 数据库表结构
 
