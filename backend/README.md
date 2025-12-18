@@ -42,8 +42,15 @@ backend/src/
 │   ├── entities.ts      # 实体（User, ApiKey, Session等）
 │   ├── value-objects.ts # 值对象
 │   └── exceptions.ts    # 领域异常
+├── core/                # 核心业务逻辑层
+│   ├── auth.ts         # 认证服务（AuthService, ApiKeyService, PasswordHasher接口）
+│   ├── registration.ts  # 注册服务
+│   ├── chat-openai.ts  # OpenAI格式处理
+│   ├── chat-claude.ts  # Claude格式处理
+│   ├── openai-adapter.ts # Jihu到OpenAI适配器
+│   └── event-logging.ts # 事件日志
 ├── application/         # 应用层
-│   └── services.ts      # 业务服务（AuthService, ApiKeyService, ChatService）
+│   └── services.ts      # Node.js特定服务（BcryptPasswordHasher, ChatService）
 ├── infrastructure/      # 基础设施层
 │   ├── repositories.ts  # Repository接口
 │   ├── sqlite-repositories.ts  # SQLite实现
@@ -52,8 +59,24 @@ backend/src/
 │   ├── oauth-flow.ts    # OAuth流程处理
 │   ├── config.ts        # 配置管理
 │   └── dependencies.ts  # 依赖注入
+├── shared/              # 共享工具和类型
+│   ├── error-handler.ts # 统一错误处理
+│   ├── logger.ts        # 结构化日志
+│   ├── validators.ts    # 请求验证
+│   ├── middleware.ts    # 共享中间件
+│   ├── response-utils.ts # 响应格式工具
+│   ├── config-service.ts # 配置服务
+│   ├── types.ts         # 类型定义
+│   └── model-utils.ts   # 模型工具
 └── presentation/        # 表现层
-    └── routes.ts        # Express路由
+    ├── controllers/     # 控制器
+    │   ├── auth-controller.ts
+    │   ├── chat-controller.ts
+    │   ├── models-controller.ts
+    │   ├── admin-controller.ts
+    │   ├── oauth-controller.ts
+    │   └── health-controller.ts
+    └── routes.ts        # Express路由入口
 ```
 
 ## 环境变量
@@ -98,21 +121,15 @@ backend/src/
 
 ## 数据持久化
 
-- SQLite数据库：`jihu_proxy.db`（与Python版本兼容）
-- OAuth配置：`jihu_oauth_config.json`（与Python版本兼容）
+- SQLite数据库：`jihu_proxy.db`（位于项目根目录）
+- OAuth配置：`jihu_oauth_config.json`（位于项目根目录）
 
 ## 技术栈
 
 - **运行时**：Node.js 20+
-- **语言**：TypeScript
-- **框架**：Express
+- **语言**：TypeScript 5.6+
+- **框架**：Express 4.x
 - **数据库**：better-sqlite3
 - **HTTP客户端**：axios
 - **密码哈希**：bcrypt
-
-## 与Python版本的兼容性
-
-- ✅ API接口完全兼容
-- ✅ 数据库格式兼容（可直接使用现有数据库）
-- ✅ OAuth配置格式兼容
-- ✅ 环境变量兼容
+- **架构模式**：DDD (Domain-Driven Design)

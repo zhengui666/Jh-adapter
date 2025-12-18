@@ -1,3 +1,21 @@
 name = "jh-adapter-backend"
 main = "backend-cloudflare/src/worker.ts"
 compatibility_date = "2024-01-01"
+compatibility_flags = ["nodejs_compat"]
+
+# D1 数据库绑定
+# 注意：database_id 需要在部署后通过脚本或 Dashboard 配置
+# 如果使用一键部署，请在 Cloudflare Dashboard 中手动配置 D1 绑定
+# 或者设置环境变量 D1_DATABASE_ID 后运行 scripts/configure-d1-binding-wrangler.sh
+[[d1_databases]]
+binding = "DB"
+database_name = "JH_ADAPTER_DB"
+# database_id 占位符，部署后需要替换为实际的数据库 ID
+# 可以通过以下方式配置：
+# 1. 在 Cloudflare Dashboard 中手动配置（推荐）
+# 2. 运行 scripts/configure-d1-binding-wrangler.sh 脚本
+# 3. 使用 GitHub Actions 自动配置（需要设置 CLOUDFLARE_D1_DATABASE_ID secret）
+database_id = "REPLACE_WITH_YOUR_D1_ID"
+
+# Node.js 兼容性（用于支持某些 Node.js API）
+node_compat = true
