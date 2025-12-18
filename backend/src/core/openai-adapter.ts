@@ -121,6 +121,17 @@ export function adaptJihuToOpenAI(raw: any, requestedModel?: string): any {
         if (content.length === 0) {
           content = [{ type: "text", text: "" }];
         }
+        
+        // 最终安全检查：确保数组中每个元素都是有效的对象
+        // 防止某些边界情况导致数组中出现 undefined
+        content = content.filter((part: any) => {
+          return part != null && typeof part === "object" && part.type != null;
+        });
+        
+        // 如果过滤后数组为空，再次添加默认元素
+        if (content.length === 0) {
+          content = [{ type: "text", text: "" }];
+        }
       }
       // 纯文本模型：确保 content 是字符串
       else {
